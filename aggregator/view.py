@@ -167,7 +167,7 @@ def plot_element(store: RecordStore, element: str, out_path: str | Path,
     beam = store.entries(as_of, elements=[exp], types=["beam_mode"])
     for cur, nxt in zip(beam, beam[1:] + [None]):
         if cur.payload["value"] == "STABLE BEAMS":
-            bar("Stable beams", cur.t_start, nxt.t_start if nxt else t1, NEUTRAL_FILL)
+            bar("Stable beams", cur.t_start, nxt.t_start if nxt else min(t1, as_of), NEUTRAL_FILL)
     for e in store.entries(as_of, elements=marks, t0=t0, t1=t1):
         if e.type == "downtime":
             bar("Downtime", e.t_start, e.t_end, CRITICAL)

@@ -198,7 +198,7 @@ function buildChart(cfg) {
     const mid = y + RH / 2 + 6;
     body += `<text x="${L - 8}" y="${mid + 4}" text-anchor="end">${esc(row.label)}</text><line class="grid" x1="${L}" x2="${W - R}" y1="${mid}" y2="${mid}"/>`;
     for (const it of row.items) {
-      const t1 = it.t1 === undefined ? undefined : (it.t1 ?? cfg.t1);
+      const t1 = it.t1 === undefined ? undefined : (it.t1 ?? Math.min(cfg.t1, S.asOf));   // still going: draw it up to the time control, not beyond
       if ((t1 ?? it.t0) < cfg.t0 || it.t0 > cfg.t1) continue;
       const attrs = `class="hit ${it.cls}" data-tip="${esc(it.tip || '')}"${it.go ? ` data-go="${it.go}"` : ''}`;
       const x = X(it.t0);
