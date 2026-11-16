@@ -10,6 +10,7 @@ ALLOWED = {
     "aggregator": {"utils"},
     "example_device": {"utils", "aggregator"},
     "orchestrator": {"utils", "aggregator"},
+    "viewer": {"utils", "aggregator", "orchestrator"},
 }
 OURS = set(ALLOWED) | {"anonymizer", "sparsifier", "summarizer", "adapters"}
 

@@ -79,7 +79,7 @@ def show_incident(store: RecordStore, incident_id: int, as_of: Optional[int] = N
     return "\n".join(out)
 
 
-def _scope(store: RecordStore, element: str) -> tuple[list[str], list[str]]:
+def scope(store: RecordStore, element: str) -> tuple[list[str], list[str]]:
     """(boxes whose readings are plotted, every element whose events are marked)."""
     kind = store.element_kind(element)
     related = [name for _, name in store.related(element)]
@@ -110,7 +110,7 @@ def plot_element(store: RecordStore, element: str, out_path: str | Path,
     as_of = store.latest_known_at() if as_of is None else as_of
     span = store.time_span()
     t0, t1 = (span[0] if t0 is None else t0), (span[1] if t1 is None else t1)
-    boxes, marks = _scope(store, element)
+    boxes, marks = scope(store, element)
     shown = boxes[: len(SERIES)]
     ls_s = int(store.meta().get("lumisection_s", 23))
 

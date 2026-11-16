@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Operations Record browser</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Operations Record browser</div>
+  <div class="synthetic" id="banner" title="">Synthetic, not CMS data</div>
+  <div class="switches">
+    <label title="Hide everything that exists only because the data is synthetic"><input type="checkbox" id="sw-prod"> Production view</label>
+    <label id="sw-planted-wrap" title="Show the generator's hidden answers next to what the Record holds"><input type="checkbox" id="sw-planted"> Show planted answers</label>
+  </div>
+</header>
+
+<section class="clock" aria-label="Time control">
+  <div class="clock-row">
+    <span class="clock-label">Record as of</span>
+    <input id="clock-text" type="text" spellcheck="false" aria-label="As-of time, UTC">
+    <span class="muted">UTC</span>
+    <button id="clock-prev" title="Go back to the previous moment the Record learned something">&#9664; previous known</button>
+    <button id="clock-next" title="Go forward to the next moment the Record learned something">next known &#9654;</button>
+    <button id="clock-cal-end" title="The end of the calendar">End of calendar</button>
+    <button id="clock-end" title="After everything in the Record is known">Everything known</button>
+    <button id="clock-pin" title="Remember this moment and compare later moments with it">Pin for comparison</button>
+  </div>
+  <input id="clock-slider" type="range" step="60" aria-label="As-of time slider">
+  <details id="diff"><summary id="diff-summary"></summary><div id="diff-body"></div></details>
+</section>
+
+<div class="layout">
+  <nav id="nav" aria-label="Pages"></nav>
+  <main id="main" tabindex="-1"></main>
+</div>
+<div id="tip" role="tooltip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

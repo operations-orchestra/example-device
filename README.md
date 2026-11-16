@@ -24,6 +24,7 @@ behind it, the next steps and hand-off notes are in [docs/DESIGN.md](docs/DESIGN
 | `utils/` | the shared entry definition and time helpers | runs |
 | `aggregator/` | the Operations Record (SQLite), its write and read APIs, viewing tools | runs |
 | `example_device/` | the seeded generator for the synthetic device | runs |
+| `viewer/` | a local, read-only web page for looking inside the Record and its components | runs |
 | `orchestrator/` | typed query tools and the diagnosis agent | not built yet |
 | `adapters/`, `anonymizer/`, `summarizer/`, `sparsifier/` | the feed into the Record, interfaces only | not built yet |
 
@@ -35,6 +36,7 @@ so each can move to its own repository later. A test keeps their imports separat
 ```bash
 pixi install
 pixi run orchestra synth                 # builds out/record.db (about 1 MB) and out/planted.json
+pixi run orchestra view                  # open http://127.0.0.1:8765/ to browse the Record
 pixi run orchestra info                  # row counts, entry types, incident list
 pixi run orchestra show 3                # one incident as a text timeline
 pixi run orchestra show 3 --as-of 2040-03-02T12:06   # the same incident as the Record knew it then
@@ -43,6 +45,17 @@ pixi run pytest -q
 ```
 
 Without pixi: `pip install -e '.[plot,dev]'` on Python 3.10 or later.
+
+## The Record browser
+
+`orchestra view` starts a local web page (Python standard library only, bound to
+localhost, Record opened read-only). One time control at the top governs every page:
+nothing shown is later than it. Use `--db out/small/record.db` for the larger preset.
+
+Every page and field is marked as one of: production-like (no mark, uses only what is in
+the Record), **expert-filled** (present in a real Record only where experts reviewed an
+incident), or **demo only** (exists because the data is synthetic). The "Production view"
+switch hides everything demo-only. See [docs/GUI_PLAN.md](docs/GUI_PLAN.md).
 
 ## The synthetic Record
 

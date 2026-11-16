@@ -1,6 +1,8 @@
 # Plan: a GUI to understand and check what has been built
 
-Status: proposal, 16 November 2026. Nothing here is built yet.
+Status: steps 1 to 5 and the Read API page are built (16 November 2026). Not built: the
+Build-a-Record control (still an open decision), and the Tools, Agent and Feed pages, which
+wait for the orchestrator. See section 10 for what was built differently from this plan.
 Read [DESIGN.md](DESIGN.md) first for vocabulary and the current state of the code.
 
 ## 1. Purpose
@@ -249,3 +251,27 @@ Settled on 16 November 2026: the page list is right; a local web page is the for
 and production-like features must be clearly distinguished (section 4).
 
 Open: whether the Build control is wanted at all (step 6).
+
+## 10. As built
+
+Run `orchestra view` and open the address it prints.
+
+| Plan | As built |
+|---|---|
+| Pages 5.1 to 5.9 | built, except the Build-a-Record control on the Device page |
+| A vendored charting library (uPlot) | not used. The charts are about 150 lines of hand-written SVG in `app.js` (`buildChart`, `knowledgeChart`), so there is no third-party code and nothing to download. Revisit if a Record with far more points per series must be drawn. |
+| `viewer` may import `example_device` for the Build control | it does not import it. The fault descriptions and the list of entries each fault wrote come from `planted.json`. |
+| "Compare with..." | the "Pin for comparison" button: pin a moment, move the time, and the panel under the time control lists what the Record learned in between |
+| Incident view on a linear time axis | a compressed axis relative to the incident start (each step is about ten times longer), so minutes and weeks fit together |
+| Precedents: "same symptom" | an earlier incident sharing a symptom kind, where the kind is the entry type plus its result, value or flag (for example `configure:failed`). Logbook notes are ignored because every incident has them. Wording is not compared. The code is `viewer/precedents.py`; it should move to the orchestrator once a rule is chosen. |
+
+Endpoints that may be called without `as_of`, and why: `meta` (which Record is loaded and
+its time range), `next_known` (returns a time, never content), and the two demo-only
+endpoints that read `planted.json`. A test pins this list.
+
+How it was checked: `tests/test_viewer.py` (as-of refusal on every reading endpoint, no
+endpoint returns anything known later at sampled moments, the Record file is unchanged
+after serving, path traversal is refused). Home, Timeline, Incident, Device, Precedents,
+Planted answers and Entries were each loaded once in headless Chrome and looked at.
+Not checked by anyone yet: interactive behaviour in a real browser (drag to zoom, hover
+values, Play, the two switches, the Read API form), dark mode, and narrow screens.

@@ -4,6 +4,7 @@
     orchestra info  [--db out/record.db] [--as-of TIME]
     orchestra show  INCIDENT_ID [--as-of TIME]
     orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
+    orchestra view  [--db out/record.db] [--port 8765]
 
 TIME looks like 2040-03-02T01:05 (UTC).
 """
@@ -82,6 +83,17 @@ def _plot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _view(args: argparse.Namespace) -> int:
+    from viewer.server import serve
+
+    try:
+        serve(args.db, args.port)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orchestra", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -114,6 +126,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--to", dest="t_to")
     p.add_argument("--out")
     p.set_defaults(func=_plot)
+
+    p = sub.add_parser("view", help="open the Record in a local web page")
+    p.add_argument("--db", default="out/record.db")
+    p.add_argument("--port", type=int, default=8765)
+    p.set_defaults(func=_view)
 
     args = parser.parse_args(argv)
     return args.func(args)

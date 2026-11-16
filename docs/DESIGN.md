@@ -33,7 +33,7 @@ It is split into two parts on purpose:
 | The Record: database, write API, as-of read API | `aggregator/` | built, tested |
 | Text and plot viewing commands | `aggregator/view.py` | built, tested |
 | Synthetic device generator | `example_device/` | built, tested |
-| **GUI to understand and check the components** | `viewer/` | **next, section 5 and GUI_PLAN.md** |
+| GUI to understand and check the components | `viewer/` | built except the agent pages; see GUI_PLAN.md section 10 |
 | Query tools and diagnosis agent | `orchestrator/` | designed, not built, section 6 |
 | Feed interfaces | `adapters/`, `anonymizer/`, `summarizer/`, `sparsifier/` | designed, not built, section 6 |
 
@@ -165,9 +165,10 @@ orchestra synth [--preset tiny|small|full] [--seed N] [--max-size-mb N] [--out D
 orchestra info  [--db FILE] [--as-of TIME]
 orchestra show  INCIDENT_ID [--as-of TIME]
 orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
+orchestra view  [--db FILE] [--port N]
 ```
 
-### 4.5 Tests (37 pass, 1 skipped until `orchestrator/` exists)
+### 4.5 Tests (62 pass, 1 skipped until `orchestrator/` exists)
 
 | File | Checks |
 |---|---|
@@ -176,6 +177,7 @@ orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
 | `test_as_of.py` | no entry, label or link from the future; state lookback |
 | `test_boundaries.py` | import rule, SQL only in the aggregator |
 | `test_view.py` | viewing commands run and respect as-of |
+| `test_viewer.py` | the GUI service: as-of required, nothing from the future, read-only, serves the page |
 
 ### 4.6 Known weak points
 
@@ -187,7 +189,7 @@ orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
 - `planted.json` counts any earlier incident of the same mode as a precedent, even on a
   different element. See open question 2.
 
-## 5. Next: a GUI to understand and check what has been built
+## 5. The GUI, and what comes next
 
 The prototype can currently be inspected only through terminal commands and static plots.
 Before more is built, people need to see inside each component and operate it by hand,
@@ -199,7 +201,8 @@ every page. It covers the device and its fault scripts, the Record, zoomable tim
 how knowledge about an incident arrived, a side-by-side comparison of the two possible
 precedent rules, and, once they exist, the query tools and the agent.
 
-It is a proposal awaiting the project lead's decisions, listed at its end.
+It is built up to the Precedents and Read API pages. What comes next is the project
+lead's review of the synthetic data with it (open questions 1 and 2), then section 6.
 
 ## 6. After that: the agent and the feed interfaces
 
@@ -286,7 +289,7 @@ interfaces into running code.
 |---|---|---|
 | 1 | Does the synthetic data look plausible: fault signatures, the delays before recovery and cause are written down, the logbook wording? Needs the GUI first. | trust in everything after |
 | 2 | What counts as a precedent: the same element, or the same symptom anywhere in HCAL? | `planted.json` expectations, agent verdicts |
-| 3 | The three decisions at the end of GUI_PLAN.md | starting the GUI |
+| 3 | Is a Build-a-Record control in the GUI wanted at all? | nothing |
 | 4 | Should `viewer/` become a seventh repository in the organization, or live in `orchestrator`? | folder layout |
 | 5 | Logbook templates were accepted "to be revisited". Revisit before or after the agent? | how convincing recall looks |
 | 6 | Which model endpoint for the real-model run? | 6.2, second brain |
@@ -300,7 +303,7 @@ been pushed. Once it is:
 git clone git@github.com:operations-orchestra/example-device.git
 cd example-device && git checkout prototype/synthetic-record
 pixi install                      # or: pip install -e '.[plot,dev]' on Python 3.10+
-pixi run pytest -q                # 37 pass, 1 skipped
+pixi run pytest -q                # 62 pass, 1 skipped
 pixi run orchestra synth          # out/record.db, out/planted.json
 pixi run orchestra info
 pixi run orchestra show 3 --as-of 2040-03-02T12:06
@@ -310,4 +313,5 @@ Read in this order: this document, `utils/entry.py`, `aggregator/schema.sql`,
 `aggregator/store.py` (read API at the bottom half), `example_device/plan.py`, then
 `example_device/generator.py`.
 
-Start with step 1 of [GUI_PLAN.md](GUI_PLAN.md), once its open decisions are settled.
+Start by running `orchestra view` and reading the Device and Precedents pages. The next
+building step is section 6, once open questions 1 and 2 are answered.

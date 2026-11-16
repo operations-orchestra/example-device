@@ -302,12 +302,8 @@ class RecordStore:
         return [(r[0], r[1]) for r in rows]
 
     # --------------------------------------------------------------- entries
-    def entries(self, as_of: int, elements: Optional[Sequence[str]] = None,
-                t0: Optional[int] = None, t1: Optional[int] = None,
-                types: Optional[Sequence[str]] = None, kinds: Optional[Sequence[str]] = None,
-                record_classes: Optional[Sequence[str]] = None,
-                limit: Optional[int] = None) -> list[StoredEntry]:
-        """Entries known by ``as_of`` whose event time overlaps [t0, t1], oldest first."""
+    def _entry_filter(self, as_of: int, elements=None, t0=None, t1=None, types=None, kinds=None,
+                      record_classes=None, sources=None, text=None) -> tuple[str, dict[str, Any]]:
         where = ["e.known_at <= :as_of", _NOT_SUPERSEDED]
         params: dict[str, Any] = {"as_of": as_of}
 
@@ -316,7 +312,7 @@ class RecordStore:
             for i, v in enumerate(values):
                 params[f"{key}{i}"] = v
                 names.append(f":{key}{i}")
-            where.append(f"{col} IN ({', '.join(names)})")
+            where.append(f"{col} IN ({', '.join(names)})" if names else "1 = 0")
 
         if elements is not None:
             _in("e.element_id", "el", [self._eid(n) for n in elements])
@@ -326,18 +322,118 @@ class RecordStore:
             _in("e.kind", "ki", list(kinds))
         if record_classes is not None:
             _in("e.record_class", "rc", list(record_classes))
+        if sources is not None:
+            _in("e.source", "so", list(sources))
         if t1 is not None:
             where.append("e.t_start <= :t1")
             params["t1"] = t1
         if t0 is not None:
             where.append("COALESCE(e.t_end, e.t_start) >= :t0")
             params["t0"] = t0
+        if text:
+            where.append("LOWER(e.payload) LIKE :text")
+            params["text"] = f"%{text.lower()}%"
+        return " AND ".join(where), params
+
+    def entries(self, as_of: int, elements: Optional[Sequence[str]] = None,
+                t0: Optional[int] = None, t1: Optional[int] = None,
+                types: Optional[Sequence[str]] = None, kinds: Optional[Sequence[str]] = None,
+                record_classes: Optional[Sequence[str]] = None,
+                limit: Optional[int] = None, sources: Optional[Sequence[str]] = None,
+                text: Optional[str] = None, offset: int = 0,
+                newest_first: bool = False) -> list[StoredEntry]:
+        """Entries known by ``as_of`` whose event time overlaps [t0, t1], oldest first.
+
+        ``text`` matches anywhere in the payload, ignoring case.
+        """
+        where, params = self._entry_filter(as_of, elements, t0, t1, types, kinds,
+                                           record_classes, sources, text)
+        order = "e.t_start DESC, e.id DESC" if newest_first else "e.t_start, e.id"
         sql = (f"SELECT {_ENTRY_COLS} FROM entry e JOIN element el ON el.id = e.element_id "
-               f"WHERE {' AND '.join(where)} ORDER BY e.t_start, e.id")
+               f"WHERE {where} ORDER BY {order}")
         if limit is not None:
-            sql += " LIMIT :limit"
-            params["limit"] = limit
+            sql += " LIMIT :limit OFFSET :offset"
+            params["limit"], params["offset"] = limit, offset
         return [_entry(r) for r in self._db.execute(sql, params)]
+
+    def count_entries(self, as_of: int, elements=None, t0=None, t1=None, types=None, kinds=None,
+                      record_classes=None, sources=None, text=None) -> int:
+        where, params = self._entry_filter(as_of, elements, t0, t1, types, kinds,
+                                           record_classes, sources, text)
+        return self._db.execute(f"SELECT COUNT(*) FROM entry e WHERE {where}", params).fetchone()[0]
+
+    def counts_by_type(self, as_of: int) -> list[tuple[str, str, str, str, int]]:
+        """(class, source, type, kind, count) of the entries known by ``as_of``."""
+        return [tuple(r) for r in self._db.execute(
+            "SELECT e.record_class, e.source, e.type, e.kind, COUNT(*) FROM entry e "
+            f"WHERE e.known_at <= :as_of AND {_NOT_SUPERSEDED} "
+            "GROUP BY e.record_class, e.source, e.type, e.kind "
+            "ORDER BY e.record_class, e.source, e.type", {"as_of": as_of})]
+
+    def superseded_by(self, entry_id: int, as_of: int) -> Optional[int]:
+        """The correction that replaced this entry, if one is known by ``as_of``."""
+        row = self._db.execute(
+            "SELECT id FROM entry WHERE supersedes = ? AND known_at <= ? ORDER BY known_at LIMIT 1",
+            (entry_id, as_of)).fetchone()
+        return row[0] if row else None
+
+    def incidents_of_entry(self, entry_id: int, as_of: int) -> list[tuple[int, str]]:
+        """(incident id, role) for the incidents this entry is attached to."""
+        rows = self._db.execute(
+            "SELECT ie.incident_id, ie.role FROM incident_entry ie JOIN incident i ON i.id = ie.incident_id "
+            "WHERE ie.entry_id = ? AND ie.known_at <= ? AND i.known_at <= ? ORDER BY ie.incident_id",
+            (entry_id, as_of, as_of))
+        return [(r[0], r[1]) for r in rows]
+
+    _INCIDENT_TIMES = ("known_at", "recovery_known_at", "cause_known_at",
+                       "certification_known_at", "closed_known_at")
+
+    def next_known_at(self, t: int, forward: bool = True, incident_id: Optional[int] = None) -> Optional[int]:
+        """The nearest moment after (or before) ``t`` at which the Record learned something.
+
+        Returns only the time, never what was learned. With ``incident_id``, only moments
+        that concern that incident.
+        """
+        parts, params = [], []
+        if incident_id is None:
+            parts += ["SELECT known_at AS k FROM entry", "SELECT known_at FROM link",
+                      "SELECT known_at FROM incident_entry"]
+            parts += [f"SELECT {c} FROM incident" for c in self._INCIDENT_TIMES]
+        else:
+            parts += ["SELECT ie.known_at AS k FROM incident_entry ie WHERE ie.incident_id = ?",
+                      "SELECT e.known_at FROM incident_entry ie JOIN entry e ON e.id = ie.entry_id "
+                      "WHERE ie.incident_id = ?"]
+            params += [incident_id, incident_id]
+            for c in self._INCIDENT_TIMES:
+                parts.append(f"SELECT {c} FROM incident WHERE id = ?")
+                params.append(incident_id)
+        op, agg = (">", "MIN") if forward else ("<", "MAX")
+        row = self._db.execute(
+            f"SELECT {agg}(k) FROM ({' UNION ALL '.join(parts)}) WHERE k IS NOT NULL AND k {op} ?",
+            (*params, t)).fetchone()
+        return row[0]
+
+    def became_known(self, t_from: int, t_to: int, limit: int = 200) -> dict[str, Any]:
+        """What the Record learned in (t_from, t_to]: entries, incident changes, links."""
+        entries = [_entry(r) for r in self._db.execute(
+            f"SELECT {_ENTRY_COLS} FROM entry e JOIN element el ON el.id = e.element_id "
+            "WHERE e.known_at > ? AND e.known_at <= ? ORDER BY e.known_at, e.id LIMIT ?",
+            (t_from, t_to, limit))]
+        n_entries = self._db.execute(
+            "SELECT COUNT(*) FROM entry WHERE known_at > ? AND known_at <= ?", (t_from, t_to)).fetchone()[0]
+        n_links = self._db.execute(
+            "SELECT COUNT(*) FROM link WHERE known_at > ? AND known_at <= ?", (t_from, t_to)).fetchone()[0]
+        changes = []
+        labels = {"known_at": "incident opened", "recovery_known_at": "recovery action recorded",
+                  "cause_known_at": "cause confirmed", "certification_known_at": "certification recorded",
+                  "closed_known_at": "incident closed"}
+        for row in self._db.execute(
+                f"SELECT id, title, {', '.join(self._INCIDENT_TIMES)} FROM incident ORDER BY id"):
+            for col, t in zip(self._INCIDENT_TIMES, row[2:]):
+                if t is not None and t_from < t <= t_to:
+                    changes.append({"incident_id": row[0], "title": row[1], "what": labels[col], "t": t})
+        changes.sort(key=lambda c: (c["t"], c["incident_id"]))
+        return {"entries": entries, "n_entries": n_entries, "n_links": n_links, "incident_changes": changes}
 
     def get_entry(self, entry_id: int, as_of: int) -> Optional[StoredEntry]:
         row = self._db.execute(

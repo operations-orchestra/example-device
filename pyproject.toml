@@ -19,10 +19,11 @@ orchestra = "orchestra_cli:main"
 
 [tool.setuptools]
 py-modules = ["orchestra_cli"]
-packages = ["utils", "aggregator", "example_device"]
+packages = ["utils", "aggregator", "example_device", "viewer"]
 
 [tool.setuptools.package-data]
 aggregator = ["schema.sql"]
+viewer = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

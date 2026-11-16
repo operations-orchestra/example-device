@@ -85,6 +85,7 @@ class _Gen:
         self.voltage_ids: dict[str, list[tuple[int, int]]] = {}   # box -> (t_start, entry id)
         self.planted: list[dict[str, Any]] = []
         self.attached: set[tuple[int, int]] = set()
+        self.touched: list[int] = []                     # entries the current fault script wrote or used
         self.dead_box = model.boxes[-1]                  # one known dead channel, as a distractor
         self.dead_channel = model.channels[self.dead_box][6 % cfg.channels_per_box]
 
@@ -92,12 +93,14 @@ class _Gen:
     def add(self, source: str, record_class: str, kind: str, type: str, element: str, t: int,
             known: Optional[int] = None, t_end: Optional[int] = None,
             payload: Optional[dict] = None) -> int:
-        return self.store.add_entry(Entry(
+        eid = self.store.add_entry(Entry(
             source=source, record_class=record_class, kind=kind, type=type, element=element,
             t_start=t, t_end=t_end, known_at=t if known is None else known, payload=payload or {},
             raw_ref=f"synthetic://{source}/{type}/{element}?t={to_iso(t)}",
             producer=PRODUCER, producer_version=VERSION,
         ))
+        self.touched.append(eid)
+        return eid
 
     def say(self, key: str, **kw: Any) -> str:
         return self.words.choice(texts.T[key]).format(**kw)
@@ -311,6 +314,7 @@ class _Gen:
 
     def attach(self, iid: int, entry_id: int, role: str, known: int) -> None:
         """Attach an entry to an incident once; a later role for the same entry is dropped."""
+        self.touched.append(entry_id)
         if (iid, entry_id) not in self.attached:
             self.attached.add((iid, entry_id))
             self.store.attach(iid, entry_id, role, known)
@@ -481,6 +485,7 @@ class _Gen:
         comm_cause = comm[1].t + 4 * DAY if len(comm) >= 2 else None   # understood after it recurs
         cfg_cause = self.faults(CONFIGURE_FAILURE)[0].t + 6 * DAY
         for f in self.plan.faults:
+            self.touched = []
             if f.mode == FED_COMM_LOSS:
                 self.fed_comm_loss(f, comm_cause)
             elif f.mode == CONFIGURE_FAILURE:
@@ -493,6 +498,7 @@ class _Gen:
                 self.planned_change(f)
             elif f.mode == BOX_SYNC_LOSS:
                 self.box_sync_loss(f)
+            self.planted[-1]["entry_ids"] = sorted(set(self.touched))
 
     def finish_planted(self) -> None:
         """Work out, from the Record itself, what an honest answer is at each ask time."""
@@ -551,7 +557,7 @@ def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dic
 
     out.mkdir(parents=True, exist_ok=True)
     planted_path.write_text(json.dumps({"banner": BANNER, "seed": cfg.seed, "preset": cfg.preset,
-                                        "planted": gen.planted}, indent=2) + "\n")
+                                        "modes": texts.MODES, "planted": gen.planted}, indent=2) + "\n")
     return {"db": str(db_path), "planted": str(planted_path), "size_mb": round(size_mb, 2),
             "config": cfg, "adjustments": notes, "counts": counts, "n_planted": len(gen.planted),
             "fills": len(plan.fills), "runs": len(plan.runs)}

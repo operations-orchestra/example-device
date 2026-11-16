@@ -125,3 +125,48 @@ QUESTIONS = {
     "planned_change": "Occupancy in {element} is higher than in the last fill. Is something wrong?",
     "box_sync_loss": "{element} is sending data integrity errors and the run has stopped. What should we do?",
 }
+
+# What each fault script does, in words. Written into planted.json for people to read.
+MODES = {
+    "configure_failure": {
+        "title": "Configure failure after a low-voltage power cycle",
+        "story": "A readout box's control module loses its control link when its low voltage is "
+                 "switched back on. Hours later HCAL fails to configure and three automatic "
+                 "recoveries fail. The crew sees only 'HCAL in error'. An expert power-cycles the "
+                 "module. The logbook says only that the expert intervened; what was done is "
+                 "written 6 hours later, and the cause 6 days later. It happens on the first two "
+                 "fills after the technical stop.",
+    },
+    "fed_comm_loss": {
+        "title": "FED communication loss",
+        "story": "A FED goes out of sync and the run stops. Reconfiguring HCAL fixes it, and the "
+                 "logbook says so at once. The cause is understood only 4 days after the problem "
+                 "has happened a second time; if it never recurs it is closed as unresolved.",
+    },
+    "lv_drift_trip": {
+        "title": "Low-voltage sag, then a trip",
+        "story": "A supply's output voltage sags by 0.35 V over 6 hours and then trips. The boxes "
+                 "it powers go dead and the run stops. Power-cycling restores running. The data "
+                 "from the trip to the run stop are certified bad. Two weeks later an expert names "
+                 "the cause and links the falling voltage readings to it.",
+    },
+    "hot_channels": {
+        "title": "Hot channels",
+        "story": "Two or three channels of one box become noisy until the end of the fill. There "
+                 "is no downtime. The DQM shifter notes a hot spot, the data are certified bad, and "
+                 "the channels are masked for the next fill. A cause is given 5 days later in 70% of "
+                 "cases; otherwise it is closed as unresolved.",
+    },
+    "box_sync_loss": {
+        "title": "Data integrity errors, never explained",
+        "story": "A readout box sends corrupted data and the run stops. A front-end reset fixes it. "
+                 "No cause is ever found; it is closed as unresolved 10 days later.",
+    },
+    "planned_change": {
+        "title": "Planned threshold change (not a fault)",
+        "story": "The run coordinator announces a lower zero-suppression threshold for one "
+                 "subdetector three hours ahead. From the next fill the occupancy is 12 to 20% "
+                 "higher. Nothing is wrong, and no incident exists. It is planted to check that a "
+                 "change in the data is not mistaken for a fault.",
+    },
+}
