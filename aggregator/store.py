@@ -529,6 +529,83 @@ class RecordStore:
         )
         return [(r[0], _entry(r[1:])) for r in rows]
 
+    # ------------------------------------------------- raw rows, for illustration
+    _INCIDENT_PAIRS = (("recovery_action", "recovery_known_at"), ("confirmed_cause", "cause_known_at"),
+                       ("certification", "certification_known_at"), ("final_status", "closed_known_at"))
+
+    def _raw(self, sql: str, params: Sequence[Any] = ()) -> dict[str, Any]:
+        cur = self._db.execute(sql, params)
+        return {"columns": [d[0] for d in cur.description], "rows": [list(r) for r in cur.fetchall()]}
+
+    def _mask_incidents(self, table: dict[str, Any], as_of: int) -> dict[str, Any]:
+        """Blank the incident columns that were not yet known at ``as_of``."""
+        col = {name: i for i, name in enumerate(table["columns"])}
+        for row in table["rows"]:
+            for value, known in self._INCIDENT_PAIRS:
+                if row[col[known]] is None or row[col[known]] > as_of:
+                    row[col[value]] = row[col[known]] = None
+            if row[col["t_end"]] is not None and row[col["t_end"]] > as_of:
+                row[col["t_end"]] = None
+        return table
+
+    def table_counts(self, as_of: int) -> dict[str, int]:
+        """Rows in each table that the Record held at ``as_of``."""
+        one = lambda sql, *p: self._db.execute(sql, p).fetchone()[0]
+        return {
+            "element": one("SELECT COUNT(*) FROM element"),
+            "element_relation": one("SELECT COUNT(*) FROM element_relation"),
+            "entry": one("SELECT COUNT(*) FROM entry WHERE known_at <= ?", as_of),
+            "link": one("SELECT COUNT(*) FROM link WHERE known_at <= ?", as_of),
+            "incident": one("SELECT COUNT(*) FROM incident WHERE known_at <= ?", as_of),
+            "incident_entry": one("SELECT COUNT(*) FROM incident_entry WHERE known_at <= ?", as_of),
+            "query_log": one("SELECT COUNT(*) FROM query_log"),
+            "meta": one("SELECT COUNT(*) FROM meta"),
+        }
+
+    def table_sample(self, table: str, as_of: int, limit: int = 6) -> dict[str, Any]:
+        """A few raw rows of one table, as the Record held them at ``as_of``, chosen for variety."""
+        queries = {
+            "element": ("SELECT * FROM element WHERE id IN (SELECT MIN(id) FROM element GROUP BY kind) "
+                        "ORDER BY id LIMIT ?", (limit,)),
+            "element_relation": ("SELECT * FROM element_relation ORDER BY element_id, relation LIMIT ?", (limit,)),
+            "entry": ("SELECT * FROM entry WHERE id IN (SELECT MIN(id) FROM entry WHERE known_at <= ? "
+                      "GROUP BY source, kind) ORDER BY record_class, id LIMIT ?", (as_of, limit + 4)),
+            "link": ("SELECT * FROM link WHERE id IN (SELECT MIN(id) FROM link WHERE known_at <= ? "
+                     "GROUP BY link_type, relation) ORDER BY id LIMIT ?", (as_of, limit)),
+            "incident": ("SELECT * FROM incident WHERE known_at <= ? ORDER BY id LIMIT ?", (as_of, limit)),
+            "incident_entry": ("SELECT * FROM incident_entry WHERE known_at <= ? AND rowid IN "
+                               "(SELECT MIN(rowid) FROM incident_entry WHERE known_at <= ? GROUP BY role) "
+                               "ORDER BY incident_id, entry_id LIMIT ?", (as_of, as_of, limit + 2)),
+            "query_log": ("SELECT * FROM query_log ORDER BY id LIMIT ?", (limit,)),
+            "meta": ("SELECT * FROM meta WHERE key <> 'config' ORDER BY key LIMIT ?", (limit + 4,)),
+        }
+        if table not in queries:
+            raise KeyError(f"unknown table {table!r}")
+        out = self._raw(*queries[table])
+        return self._mask_incidents(out, as_of) if table == "incident" else out
+
+    def incident_rows(self, incident_id: int, as_of: int, limit: int = 8) -> dict[str, dict[str, Any]]:
+        """The raw rows, table by table, that together make up one incident at ``as_of``."""
+        inc = self._mask_incidents(self._raw(
+            "SELECT * FROM incident WHERE id = ? AND known_at <= ?", (incident_id, as_of)), as_of)
+        attached = self._raw(
+            "SELECT ie.* FROM incident_entry ie JOIN entry e ON e.id = ie.entry_id "
+            "WHERE ie.incident_id = ? AND ie.known_at <= ? AND e.known_at <= ? "
+            "ORDER BY e.t_start, e.id LIMIT ?", (incident_id, as_of, as_of, limit))
+        ids = [r[1] for r in attached["rows"]] or [-1]
+        marks = ", ".join("?" for _ in ids)
+        entries = self._raw(f"SELECT * FROM entry WHERE id IN ({marks}) ORDER BY t_start, id", ids)
+        links = self._raw(
+            f"SELECT * FROM link WHERE known_at <= ? AND src_entry_id IN ({marks}) "
+            f"AND dst_entry_id IN (SELECT entry_id FROM incident_entry WHERE incident_id = ? AND known_at <= ?) "
+            "ORDER BY id", (as_of, *ids, incident_id, as_of))
+        col = {name: i for i, name in enumerate(entries["columns"])}
+        el_ids = sorted({r[col["element_id"]] for r in entries["rows"]}
+                        | {r[inc["columns"].index("element_id")] for r in inc["rows"]}) or [-1]
+        elements = self._raw(
+            f"SELECT * FROM element WHERE id IN ({', '.join('?' for _ in el_ids)}) ORDER BY id", el_ids)
+        return {"incident": inc, "incident_entry": attached, "entry": entries, "link": links, "element": elements}
+
     # ------------------------------------------------------------ inspection
     def meta(self) -> dict[str, str]:
         return dict(self._db.execute("SELECT key, value FROM meta ORDER BY key"))

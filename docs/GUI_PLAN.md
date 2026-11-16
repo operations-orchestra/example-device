@@ -259,6 +259,8 @@ Run `orchestra view` and open the address it prints.
 | Plan | As built |
 |---|---|
 | Pages 5.1 to 5.9 | built, except the Build-a-Record control on the Device page |
+| Tables as a collapsed list on the Entries page | a **Tables** page: a diagram of the eight tables and how their columns point to each other, the meaning of every column, real example rows, and one incident followed row by row through the tables. Column meanings live in `aggregator/schema_doc.py`; a test checks they match the real columns. |
+| Detector map as a list on the demo-only Device page | a **Detector map** page (also shown on Home), production-like because it is read from the Record: supplies, boxes with their channels, and FEDs drawn with their connections, each with its state and open issues at the time control |
 | A vendored charting library (uPlot) | not used. The charts are about 150 lines of hand-written SVG in `app.js` (`buildChart`, `knowledgeChart`), so there is no third-party code and nothing to download. Revisit if a Record with far more points per series must be drawn. |
 | `viewer` may import `example_device` for the Build control | it does not import it. The fault descriptions and the list of entries each fault wrote come from `planted.json`. |
 | "Compare with..." | the "Pin for comparison" button: pin a moment, move the time, and the panel under the time control lists what the Record learned in between |

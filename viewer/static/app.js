@@ -273,7 +273,7 @@ const hideTip = () => { $('#tip').hidden = true; };
 /* ------------------------------------------------------------------------- pages */
 const PAGES = {};
 const NAV = [
-  ['Record', [['home', 'Home'], ['record', 'Entries'], ['incidents', 'Incidents'], ['timeline', 'Timeline'], ['precedents', 'Precedents'], ['api', 'Read API']]],
+  ['Record', [['home', 'Home'], ['map', 'Detector map'], ['tables', 'Tables'], ['record', 'Entries'], ['incidents', 'Incidents'], ['timeline', 'Timeline'], ['precedents', 'Precedents'], ['api', 'Read API']]],
   ['Demo only', [['device', 'Device and faults'], ['planted', 'Planted answers']]],
 ];
 function drawNav(current) {
@@ -283,7 +283,7 @@ function drawNav(current) {
 }
 
 PAGES.home = async () => {
-  const o = await api('overview');
+  const [o, mapData] = await Promise.all([api('overview'), api('map')]);
   const m = S.meta;
   const rows = [
     { label: 'Stable beams', items: o.beam.filter((b) => b.mode === 'STABLE BEAMS').map((b) => ({ t0: b.t0, t1: b.t1, cls: 'beam', tip: `Stable beams ${fmt(b.t0)} to ${fmt(b.t1)}` })) },
@@ -309,6 +309,8 @@ PAGES.home = async () => {
   </div></div>
   <h2>Calendar</h2><p class="muted small">Click anywhere on the strip to set the time control to that moment. The blue line is the time control.</p>
   <div id="cal"></div>
+  <h2>Detector map at this time</h2><p class="muted small">Click an element for its timeline. <a href="#/map">Open the map page</a>.</p>
+  <div id="home-map"></div>
   <h2>Components</h2>
   <div class="flow">
     <div class="box off"><b>Feed</b>adapters, anonymizer, summarizer, sparsifier<br><span class="small">interfaces only, not built</span></div>
@@ -330,6 +332,7 @@ PAGES.home = async () => {
     const chart = buildChart(cfg);
     host.innerHTML = chart.svg;
     wireChart(host, chart, cfg, { click: (t) => setAsOf(t) });
+    $('#home-map').innerHTML = mapSvg(mapData, $('#home-map').clientWidth);
   } };
 };
 
@@ -339,6 +342,7 @@ const TABLES = [
   ['entry', 'Every reading summary, event, note and flag, in one common envelope'], ['link', 'Connections between entries: direct (same place and time) or indirect (expert reasoning)'],
   ['incident', 'Problems people grouped entries into, with recovery, cause and certification kept apart'], ['incident_entry', 'Which entries belong to which incident, and in what role'],
   ['query_log', 'Every read made by the agent tools (empty until they exist)'], ['meta', 'What built this Record']];
+void TABLES;
 PAGES.record = async () => {
   const o = await api('overview');
   const params = { limit: 100, offset: RF.offset, order: RF.order };
@@ -350,8 +354,7 @@ PAGES.record = async () => {
   const sel = (key, label, values) => `<label>${label} <select data-rf="${key}"><option value="">all</option>${values.map((v) => `<option${RF[key] === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></label>`;
   const html = `<h1>Entries</h1>
   <p class="muted">Every row of the Record, as known at the time control. Click a row for the full entry.</p>
-  <details><summary>The eight tables of the Record</summary><div class="tablewrap"><table><tr><th>Table</th><th class="num">Rows in total</th><th>Holds</th></tr>
-  ${TABLES.map(([t, what]) => `<tr><td class="mono">${t}</td><td class="num">${t === 'meta' ? '' : o.tables[t]}</td><td>${what}</td></tr>`).join('')}</table></div></details>
+  <p class="small">These are the rows of the <span class="mono">entry</span> table. For how it fits with the other tables, see <a href="#/tables">Tables</a>.</p>
   <div class="filters">
     ${sel('cls', 'Class', uniq(0))}${sel('source', 'Source', uniq(1))}${sel('type', 'Type', uniq(2))}${sel('kind', 'Kind', uniq(3))}
     ${sel('element', 'Element', S.elements.map((e) => e.name))}
@@ -628,16 +631,6 @@ PAGES.device = async () => {
   if (!modes.includes(DV.mode)) { DV.mode = modes[0]; DV.idx = 0; }
   const cases = d.cases.filter((c) => c.mode === DV.mode);
   const c = cases[Math.min(DV.idx, cases.length - 1)];
-  const tree = (parent) => {
-    const kids = S.elements.filter((e) => e.parent === parent && e.kind !== 'channel');
-    if (!kids.length) return '';
-    return '<ul>' + kids.map((e) => {
-      const rel = e.related.filter(([r]) => !r.endsWith('_of')).map(([r, n]) => `${r.replace(/_/g, ' ')} ${n}`).join(', ');
-      const serves = e.related.filter(([r]) => r.endsWith('_of')).map(([, n]) => n).join(', ');
-      const nch = S.elements.filter((x) => x.parent === e.name && x.kind === 'channel').length;
-      return `<li>${elLink(e.name)} <span class="muted small">${e.kind.replace('_', ' ')}${nch ? `, ${nch} channels` : ''}${rel ? ' · ' + rel : ''}${serves ? ' · serves ' + serves : ''}</span>${tree(e.name)}</li>`;
-    }).join('') + '</ul>';
-  };
   const html = `${demoBand('This page shows the generator\'s own view of the data. It ignores the time control on purpose: it lists when each piece <i>will</i> become known. Nothing here would exist for a real detector.')}
   <h1>Device and faults</h1>
   <h2>Fault catalogue</h2>
@@ -655,7 +648,7 @@ PAGES.device = async () => {
   <div class="tablewrap"><table><tr><th>Role</th>${ENTRY_HEAD}<th>Delay</th></tr>${c.entries.map((e) => `<tr class="click" data-go="#/entry/${e.id}"><td>${esc(e.role)}</td>
     <td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${esc(describe(e))}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>
   <p class="muted small">Opening an entry or incident from here uses the time control; if it says "not known", move the time forward.</p>
-  <h2>Detector map</h2><div class="card tree">${tree(null)}</div>
+  <p>The <a href="#/map">detector map</a> is on its own page: it is read from the Record, so it is not demo only.</p>
   <h2>Calendar</h2>
   <details><summary>${d.runs.length} runs in ${new Set(d.runs.map((r) => r.fill)).size} fills</summary><div class="tablewrap"><table><tr><th class="num">Run</th><th class="num">Fill</th><th>Start</th><th>End</th><th class="num">Lumisections</th><th>Why it stopped</th></tr>
   ${d.runs.map((r) => `<tr><td class="num">${r.run}</td><td class="num">${r.fill}</td><td class="t">${fmt(r.t0)}</td><td class="t">${fmt(r.t1)}</td><td class="num">${r.n_ls}</td><td>${esc(r.reason.replace(/_/g, ' '))}</td></tr>`).join('')}</table></div></details>`;
@@ -677,6 +670,165 @@ PAGES.planted = async () => {
     <td>${c.incident_id ? incLink(c.incident_id) : '<span class="muted">none</span>'}</td><td>${asofBtn(c.ask_at, 'go to ask time')}</td></tr>`).join('')}</table></div>
   <p class="muted small">Here a precedent is any earlier planted case of the same mode. Compare with the two Record-only rules on the <a href="#/precedents">Precedents</a> page, with "Show planted answers" switched on.</p>`;
   return { html };
+};
+
+
+/* --------------------------------------------------------- detector map */
+const NORMAL = new Set(['on', 'ok', 'STABLE BEAMS', 'NO BEAM', 'TECHNICAL STOP']);
+function mapSvg(d, width) {
+  const W = Math.max(760, width), SW = 170, FW = 170, SX = 16, FX = W - FW - 16, BX = SX + SW + 70, BW = FX - 70 - BX, RH = 50, GAP = 10;
+  const by = Object.fromEntries(d.elements.map((e) => [e.name, e]));
+  const kids = (parent, kind) => d.elements.filter((e) => e.parent === parent && e.kind === kind);
+  const rel = (e, r) => e.related.filter(([x]) => x === r).map(([, n]) => n);
+  const hot = Object.fromEntries(d.flags.map((f) => [f.element, f]));
+  const issues = {};
+  for (const i of d.open_issues) (issues[i.element] = issues[i.element] || []).push(i);
+  let y = 8, body = '', wires = '';
+  const node = (e, x, yy, w, h, extra) => {
+    const st = Object.entries(e.states);
+    const bad = st.some(([, v]) => !NORMAL.has(v.value));
+    const tip = [`${e.name} (${e.kind.replace('_', ' ')})`].concat(st.map(([k, v]) => `${k.replace('_', ' ')}: ${v.value} since ${fmt(v.since)}`),
+      (issues[e.name] || []).map((i) => `open issue #${i.id}: ${i.title} (${i.status})`)).join('\n');
+    let g = `<g class="hit" data-go="#/timeline/${encodeURIComponent(e.name)}" data-tip="${esc(tip)}">
+      <rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="6" class="node${bad ? ' bad' : ''}"/>
+      <text class="title" x="${x + 10}" y="${yy + 18}">${esc(e.name)}</text>
+      <text x="${x + 10}" y="${yy + 34}">${st.length ? st.map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v.value}`).join(' · ') : ''}</text>${extra || ''}</g>`;
+    (issues[e.name] || []).forEach((i, k) => {
+      g += `<text class="hit issue" x="${x + w - 8}" y="${yy + 18 + 14 * k}" text-anchor="end" data-go="#/incident/${i.id}" data-tip="${esc(i.title + ' (' + i.status + ')')}">open issue #${i.id}</text>`;
+    });
+    return g;
+  };
+  const centre = {};
+  for (const exp of d.elements.filter((e) => e.kind === 'experiment')) {
+    for (const det of kids(exp.name, 'detector')) {
+      for (const sub of kids(det.name, 'subdetector')) {
+        const boxes = kids(sub.name, 'readout_box');
+        const top = y;
+        body += `<text class="title" x="${BX}" y="${y + 14}">${esc(sub.name)}</text>` +
+          (issues[sub.name] || []).map((i) => `<text class="hit issue" x="${BX + 40}" y="${y + 14}" data-go="#/incident/${i.id}">open issue #${i.id}</text>`).join('');
+        y += 22;
+        for (const b of boxes) {
+          const chans = kids(b.name, 'channel');
+          const cw = Math.min(11, (BW - 150) / Math.max(1, chans.length));
+          const cells = chans.map((c, k) => `<rect class="${hot[c.name] ? 'chan hot' : 'chan'}" x="${BX + 140 + k * cw}" y="${y + RH - 17}" width="${cw - 2}" height="9"><title>${esc(c.name)}${hot[c.name] ? ': flagged ' + hot[c.name].flag : ''}</title></rect>`).join('');
+          const nhot = chans.filter((c) => hot[c.name]).length;
+          body += node(b, BX, y, BW, RH - GAP, cells + `<text x="${BX + 140}" y="${y + 18}">${chans.length} channels${nhot ? `, ${nhot} flagged hot` : ''}</text>`);
+          centre[b.name] = y + (RH - GAP) / 2;
+          y += RH;
+        }
+        // supplies and FEDs sit beside the boxes they serve
+        for (const [kind, x, w, relation] of [['lv_supply', SX, SW, 'powered_by'], ['fed', FX, FW, 'read_out_by']]) {
+          const names = [...new Set(boxes.flatMap((b) => rel(b, relation)))];
+          for (const n of names) {
+            const served = boxes.filter((b) => rel(b, relation).includes(n)).map((b) => centre[b.name]);
+            const cy = served.reduce((a, v) => a + v, 0) / served.length;
+            body += node(by[n], x, cy - (RH - GAP) / 2, w, RH - GAP);
+            for (const sy of served) {
+              wires += kind === 'lv_supply' ? `<path class="wire" d="M${x + w},${cy} C${x + w + 35},${cy} ${BX - 35},${sy} ${BX},${sy}"/>`
+                : `<path class="wire" d="M${BX + BW},${sy} C${BX + BW + 35},${sy} ${x - 35},${cy} ${x},${cy}"/>`;
+            }
+          }
+        }
+        body += `<line class="grid" x1="${SX}" x2="${W - 16}" y1="${y + 2}" y2="${y + 2}"/>`;
+        y += 14;
+        void top;
+      }
+    }
+  }
+  const head = `<text x="${SX}" y="${y + 8}">low-voltage supplies (power the boxes)</text>
+    <text x="${BX + BW / 2}" y="${y + 8}" text-anchor="middle">readout boxes and their channels</text>
+    <text x="${FX + FW}" y="${y + 8}" text-anchor="end">FEDs (read the boxes out)</text>`;
+  return `<svg viewBox="0 0 ${W} ${y + 18}" width="${W}" height="${y + 18}" role="img" aria-label="detector map">${wires}${body}${head}</svg>`;
+}
+function mapHeader(d) {
+  const top = d.elements.filter((e) => e.kind === 'experiment' || e.kind === 'detector');
+  const bits = top.map((e) => `<b>${elLink(e.name)}</b> <span class="muted">${e.kind}</span>` +
+    Object.entries(e.states).map(([k, v]) => ` · ${k.replace(/_/g, ' ')}: <b>${esc(v.value)}</b> since ${fmt(v.since)}`).join('') +
+    d.open_issues.filter((i) => i.element === e.name).map((i) => ` · <a href="#/incident/${i.id}">open issue #${i.id}</a> (${i.status})`).join(''));
+  return `<p>${bits.join('<br>')}</p>`;
+}
+PAGES.map = async () => {
+  const d = await api('map');
+  const n = (k) => d.elements.filter((e) => e.kind === k).length;
+  const html = `<h1>Detector map</h1>
+  <p class="muted">The device as the Record describes it: ${n('subdetector')} subdetectors, ${n('readout_box')} readout boxes, ${n('channel')} channels, ${n('lv_supply')} low-voltage supplies and ${n('fed')} FEDs. This comes from the <a href="#/tables">element and element_relation tables</a>. States and open issues are shown as known at the time control.</p>
+  ${mapHeader(d)}
+  <div class="key"><span><i style="background:var(--critical)"></i>red outline: a state that is not "on" or "ok"</span><span><i style="background:var(--critical);height:9px;width:9px"></i>channel flagged hot</span><span>click an element for its timeline</span></div>
+  <div id="map"></div>
+  <h2>How to read it</h2>
+  <p>A fault in a shared part shows up in everything it serves. If a supply trips, every box it powers goes dead; if a FED loses sync, every box it reads stops sending data. That is why the Record keeps these connections: two entries are related not only when they are about the same element, but also when their elements share a supply or a FED.</p>
+  <h2>Open issues at this time (${d.open_issues.length})</h2>
+  ${d.open_issues.length ? '<ul>' + d.open_issues.map((i) => `<li>${incLink(i.id, i.title)} on ${esc(i.element)}, ${i.status}, since ${fmt(i.t_start)}</li>`).join('') + '</ul>' : '<p class="muted">None. Move the time control into the calendar to see them appear and close.</p>'}`;
+  return { html, mount() { $('#map').innerHTML = mapSvg(d, $('#map').clientWidth); } };
+};
+
+/* --------------------------------------------------------------- tables */
+const ER_POS = { element: [20, 20], element_relation: [20, 150], entry: [290, 20], link: [570, 20], incident_entry: [570, 250], incident: [290, 320], query_log: [830, 20], meta: [830, 180] };
+function erDiagram(tables) {
+  const BW = 210, HH = 26, RH = 16;
+  const idx = Object.fromEntries(tables.map((t) => [t.name, t]));
+  const rowY = (t, i) => ER_POS[t][1] + HH + RH * i + 11;
+  let boxes = '', edges = '';
+  for (const t of tables) {
+    const [x, y] = ER_POS[t.name], h = HH + RH * t.columns.length + 6;
+    boxes += `<g class="hit" data-scroll="t-${t.name}" data-tip="${esc(t.purpose)}"><rect class="node" x="${x}" y="${y}" width="${BW}" height="${h}" rx="6"/>
+      <text class="title" x="${x + 10}" y="${y + 17}">${t.name}</text><text x="${x + BW - 10}" y="${y + 17}" text-anchor="end">${t.count} rows</text>
+      <line class="axis" x1="${x}" x2="${x + BW}" y1="${y + HH - 2}" y2="${y + HH - 2}"/>
+      ${t.columns.map(([name, , ref], i) => `<text x="${x + 10}" y="${rowY(t.name, i) + 4}"${name === 'id' ? ' class="title"' : ''}>${name}${ref ? ' → ' + ref : ''}</text>`).join('')}</g>`;
+    t.columns.forEach(([, , ref], i) => {
+      if (!ref) return;
+      const [tt, tc] = ref.split('.');
+      if (tt === t.name) return;                       // a row pointing at its own table: said in the text
+      const [tx] = ER_POS[tt], y1 = rowY(t.name, i), y2 = rowY(tt, idx[tt].columns.findIndex((c) => c[0] === tc));
+      let d;
+      if (tx === x) d = `M${x},${y1} C${x - 22},${y1} ${x - 22},${y2} ${x},${y2}`;
+      else if (tx < x) d = `M${x},${y1} C${x - 30},${y1} ${tx + BW + 30},${y2} ${tx + BW},${y2}`;
+      else d = `M${x + BW},${y1} C${x + BW + 30},${y1} ${tx - 30},${y2} ${tx},${y2}`;
+      const ex = tx === x ? x : tx < x ? tx + BW : tx;
+      edges += `<path class="wire" d="${d}"/><circle class="wire-end" cx="${ex}" cy="${y2}" r="3.5"/>`;
+    });
+  }
+  return `<svg viewBox="0 0 1060 590" width="1060" height="590" role="img" aria-label="the tables of the Record and how they point to each other">${boxes}${edges}</svg>`;
+}
+const TIME_COL = /(_at|^t_start|^t_end|^as_of)$/;
+function rawTable(t, highlight) {
+  if (!t.rows.length) return '<p class="muted">No rows at this time.</p>';
+  const cell = (col, v) => {
+    if (v == null) return '<span class="unknown">empty</span>';
+    if (TIME_COL.test(col)) return `<span data-tip="stored as ${v} (seconds since 1970, UTC)">${fmt(v)}</span>`;
+    const str = String(v);
+    return str.length > 46 ? `<span data-tip="${esc(str)}">${esc(str.slice(0, 44))}…</span>` : esc(str);
+  };
+  return `<div class="tablewrap"><table class="raw"><tr>${t.columns.map((c) => `<th class="${highlight && highlight.includes(c) ? 'hl' : ''}">${c}</th>`).join('')}</tr>
+    ${t.rows.map((r) => `<tr>${r.map((v, i) => `<td class="${highlight && highlight.includes(t.columns[i]) ? 'hl' : ''}">${cell(t.columns[i], v)}</td>`).join('')}</tr>`).join('')}</table></div>`;
+}
+const TB = { incident: null };
+PAGES.tables = async () => {
+  const d = await api('tables', TB.incident ? { incident: TB.incident } : {});
+  const w = d.walk;
+  const html = `<h1>The tables of the Record</h1>
+  <p class="muted">The Record is one database with eight tables. The diagram shows each table's columns; a line means "this column holds the id of a row in that table". Click a table to jump to its description and real rows. Row counts and example rows are as known at the time control.</p>
+  <div class="tablewrap">${erDiagram(d.tables)}</div>
+  <div class="card"><b>In one paragraph</b>
+    <p>An <b>element</b> is a part of the detector. An <b>entry</b> is one recorded thing about one element, with two times: when it happened and when the Record learned of it. A <b>link</b> connects two entries. An <b>incident</b> is a problem; <b>incident_entry</b> lists which entries belong to it and in what role. <b>element_relation</b> says which supply powers a box and which FED reads it.</p></div>
+  <h2>Follow one incident through the tables ${EXPERT}</h2>
+  ${w ? `<div class="filters"><label>Incident <select id="tb-inc">${d.incidents.map((i) => `<option value="${i.id}"${i.id === d.incident_id ? ' selected' : ''}>#${i.id} ${esc(i.title)}</option>`).join('')}</select></label> <a href="#/incident/${d.incident_id}">open its incident page</a></div>
+  <h3>1. One row in <span class="mono">incident</span></h3><p class="muted small">The problem itself. Labels that were not yet known at the time control are empty.</p>${rawTable(w.incident, ['id', 'element_id'])}
+  <h3>2. Rows in <span class="mono">incident_entry</span> with incident_id = ${d.incident_id}</h3><p class="muted small">Each row attaches one entry to the incident and says what part it plays. First ${w.incident_entry.rows.length} shown.</p>${rawTable(w.incident_entry, ['incident_id', 'entry_id'])}
+  <h3>3. The rows in <span class="mono">entry</span> those point to</h3><p class="muted small">The recorded things themselves. Compare t_start with known_at to see how late each was learned.</p>${rawTable(w.entry, ['id', 'element_id'])}
+  <h3>4. The rows in <span class="mono">element</span> those are about</h3>${rawTable(w.element, ['id', 'parent_id'])}
+  <h3>5. Rows in <span class="mono">link</span> between those entries</h3><p class="muted small">An expert's reasoning: which entry supports which.</p>${rawTable(w.link, ['src_entry_id', 'dst_entry_id'])}`
+    : '<p class="muted">No incident is known at this time. Move the time control forward.</p>'}
+  <h2>Each table</h2>
+  ${d.tables.map((t) => `<div class="card" id="t-${t.name}"><h3 style="margin-top:0"><span class="mono">${t.name}</span> <span class="muted">· ${t.count} rows at this time</span>${['incident', 'incident_entry'].includes(t.name) ? ' ' + EXPERT : ''}</h3>
+    <p>${esc(t.purpose)}</p>
+    <div class="tablewrap"><table><tr><th>Column</th><th>Meaning</th><th>Points to</th></tr>${t.columns.map(([n, m, r]) => `<tr><td class="mono">${n}</td><td>${esc(m)}</td><td class="mono">${r}</td></tr>`).join('')}</table></div>
+    <h3>Example rows</h3>${rawTable(t.sample)}</div>`).join('')}`;
+  return { html, mount() {
+    const sel = $('#tb-inc');
+    if (sel) sel.addEventListener('change', () => { TB.incident = sel.value; render(); });
+    document.querySelectorAll('[data-scroll]').forEach((g) => g.addEventListener('click', () => document.getElementById(g.dataset.scroll).scrollIntoView({ behavior: 'smooth', block: 'start' })));
+  } };
 };
 
 /* ----------------------------------------------------------------- shell */

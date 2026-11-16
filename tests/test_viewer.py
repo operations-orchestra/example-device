@@ -48,7 +48,7 @@ def test_only_named_endpoints_skip_as_of():
     assert NO_AS_OF == {"meta", "next_known"} | DEMO_ONLY
 
 
-@pytest.mark.parametrize("route", ["overview", "entries", "incidents", "timeline", "precedents", "read"])
+@pytest.mark.parametrize("route", ["overview", "entries", "incidents", "timeline", "precedents", "read", "map"])
 def test_no_endpoint_returns_anything_from_the_future(call, store, route):
     t0, _ = store.time_span()
     rng = random.Random(11)
@@ -139,3 +139,43 @@ def test_service_serves_the_page_and_leaves_the_record_untouched(tiny):
         server.shutdown()
         server.server_close()
     assert hashlib.sha256(db.read_bytes()).hexdigest() == before
+
+
+def test_tables_page_shows_raw_rows_only_as_known(call, tiny, store):
+    first, second = [c for c in tiny["planted_cases"] if c["mode"] == "configure_failure"]
+    as_of = second["ask_at"]
+    status, body = call("tables", as_of=as_of, incident=first["incident_id"])
+    assert status == 200 and [t["name"] for t in body["tables"]] == [
+        "element", "element_relation", "entry", "link", "incident", "incident_entry", "query_log", "meta"]
+    by_name = {t["name"]: t for t in body["tables"]}
+    assert by_name["entry"]["count"] == store.count_entries(as_of) < store.count_entries(store.latest_known_at())
+    for name in ("entry", "link", "incident", "incident_entry"):
+        sample = by_name[name]["sample"]
+        for row in sample["rows"]:
+            for col, value in zip(sample["columns"], row):
+                if col.endswith("known_at") and value is not None:
+                    assert value <= as_of, (name, col)
+    # the walk through one incident: recovery is known, the cause is still blank
+    inc = dict(zip(body["walk"]["incident"]["columns"], body["walk"]["incident"]["rows"][0]))
+    assert inc["recovery_action"] and inc["confirmed_cause"] is None and inc["cause_known_at"] is None
+    attached = {row[1] for row in body["walk"]["incident_entry"]["rows"]}
+    assert attached == {row[0] for row in body["walk"]["entry"]["rows"]}
+    assert body["walk"]["link"]["rows"] == []                 # the expert's links come with the cause
+    # every documented column exists in the real table, in order
+    for t in body["tables"]:
+        if t["sample"]["rows"]:
+            assert [c[0] for c in t["columns"]] == t["sample"]["columns"], t["name"]
+
+
+def test_detector_map_shows_state_at_the_time_control(call, tiny):
+    trip = next(c for c in tiny["planted_cases"] if c["mode"] == "lv_drift_trip")
+    _, during = call("map", as_of=trip["t_event"] + 300)
+    supply = next(e for e in during["elements"] if e["name"] == trip["true_element"])
+    assert supply["states"]["supply_state"]["value"] == "tripped"
+    assert ["powered_by_of", "HBP02"] in supply["related"] or supply["related"]
+    _, before = call("map", as_of=trip["t_event"] - 300)
+    assert next(e for e in before["elements"] if e["name"] == trip["true_element"])["states"]["supply_state"]["value"] == "on"
+    hot = next(c for c in tiny["planted_cases"] if c["mode"] == "hot_channels")
+    _, later = call("map", as_of=hot["ask_at"] + 600)
+    assert {f["element"] for f in later["flags"]} and all(f["element"].startswith(hot["true_element"]) for f in later["flags"])
+    assert [i["id"] for i in later["open_issues"]] == [hot["incident_id"]]

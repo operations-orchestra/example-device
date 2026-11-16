@@ -15,7 +15,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from aggregator import RecordStore, StoredEntry
+from aggregator import TABLES, RecordStore, StoredEntry
 from aggregator.view import scope
 
 from . import precedents as prec
@@ -217,6 +217,39 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
             "t0": t0, "t1": t1}
 
 
+def tables(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """The Record's tables: what each holds, its columns, and a few real rows."""
+    as_of = _as_of(q)
+    counts = store.table_counts(as_of)
+    out = [{**t, "count": counts[t["name"]], "sample": store.table_sample(t["name"], as_of)} for t in TABLES]
+    known = store.incidents(as_of)
+    iid = _int(q, "incident") or (known[0].id if known else None)
+    walk = store.incident_rows(iid, as_of) if iid and store.incident(iid, as_of) else None
+    return {"tables": out, "incident_id": iid if walk else None, "walk": walk,
+            "incidents": [{"id": i.id, "title": i.title} for i in known]}
+
+
+def detector_map(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """The device's elements and their connections, with each element's state at the time control."""
+    as_of = _as_of(q)
+    els = []
+    for name in store.elements():
+        kind = store.element_kind(name)
+        states = {}
+        if kind != "channel":
+            for stype in store.state_types(name, as_of):
+                entry_ = store.state_at(name, stype, as_of, as_of)
+                if entry_ is not None:
+                    states[stype] = {"value": entry_.payload.get("value"), "since": entry_.t_start, "id": entry_.id}
+        els.append({"name": name, "kind": kind, "parent": store.parent(name),
+                    "related": store.related(name), "states": states})
+    flags = [{"element": e.element, "flag": e.payload.get("flag"), "id": e.id}
+             for e in store.entries(as_of, types=["channel_flag"], t0=as_of, t1=as_of)]
+    open_issues = [asdict(i) for i in store.incidents(as_of)
+                   if i.status in ("open", "mitigated") and i.t_start <= as_of]
+    return {"elements": els, "flags": flags, "open_issues": open_issues}
+
+
 def diff(store: RecordStore, q: dict, ctx: dict) -> dict:
     """What the Record learned between ``since`` and ``as_of``."""
     as_of = _as_of(q)
@@ -330,7 +363,7 @@ def demo_device(store: RecordStore, q: dict, ctx: dict) -> dict:
 ROUTES: dict[str, Callable[[RecordStore, dict, dict], dict]] = {
     "meta": meta, "next_known": next_known, "overview": overview, "elements": elements,
     "entries": entries, "entry": entry, "incidents": incidents, "incident": incident,
-    "timeline": timeline, "diff": diff, "precedents": precedents, "read": read,
+    "timeline": timeline, "tables": tables, "map": detector_map, "diff": diff, "precedents": precedents, "read": read,
     "demo/planted": demo_planted, "demo/device": demo_device,
 }
 # Endpoints that may be called without as_of, and why (see the module docstring).
