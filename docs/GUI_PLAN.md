@@ -1,0 +1,220 @@
+# Plan: a GUI to understand and check what has been built
+
+Status: proposal, 16 November 2026. Nothing here is built yet.
+Read [DESIGN.md](DESIGN.md) first for vocabulary and the current state of the code.
+
+## 1. Purpose
+
+So far the prototype can only be inspected through four terminal commands and static
+plots. That is not enough for a person to understand what each component does, or to
+judge whether the synthetic data is believable.
+
+The GUI has one job: **let a person see inside each component and operate it by hand.**
+It is not a product for shift crews and it is not a test suite.
+
+It must be good enough to answer two questions that are currently blocked:
+
+- **Q1.** Does the synthetic data look plausible to a detector expert?
+- **Q2.** What should count as a precedent: the same element, or the same symptom
+  anywhere in the detector?
+
+## 2. What "understand a component" means here
+
+For each component the GUI should show three things: what goes in, what comes out, and
+what happens when you change something.
+
+| Component | See | Operate |
+|---|---|---|
+| **Example device** (the generator) | the detector tree, the calendar of fills and runs, each fault script and exactly what it wrote | choose preset, seed and size; build a new Record; compare it with the previous one |
+| **The Record** (aggregator) | the tables, every entry with its full envelope, links, incidents | filter and search entries; follow a link; open an incident |
+| **As-of reads** | the same screen at two different moments | move one time control and watch entries, labels and links appear |
+| **Read API** | each read method, its arguments and what it returns | fill in a form, run the call, see the rows that come back |
+| **Query tools** (once built) | the five agent tools and the query log | run a tool by hand exactly as the agent would |
+| **Agent** (once built) | the question, each tool call, the structured proposal, every citation | ask a question at a chosen moment, switch between the two brains |
+| **Feed interfaces** (once built) | what each stage must accept and return | nothing to run; shown as documentation |
+
+## 3. Ground rules
+
+1. **The GUI calls the real code.** Every number on screen comes from the same Python
+   read methods the agent will use. The browser does no filtering of its own, so what you
+   see is what the tools do.
+2. **One time control at the top of every page.** Nothing shown is ever later than it.
+3. **The Record is never modified.** "Build a new Record" writes a new file in a scratch
+   folder and switches the GUI to it.
+4. **The hidden answers are kept apart.** Anything from `planted.json` sits behind a
+   switch labelled "show planted answers", off by default, drawn in a distinct style.
+5. **Runs offline from a clone,** with one command and no build step.
+6. **Every page says "synthetic, not CMS data".**
+
+## 4. Pages
+
+### 4.1 Home
+
+- What Record is loaded: preset, seed, size, date range.
+- A strip of the whole calendar: fills, the technical stop, downtime, incidents. Click
+  anywhere to set the time control.
+- A diagram of the components (the one in DESIGN.md) where each box links to its page.
+
+### 4.2 Device
+
+*Understand the generator.*
+
+- **Detector map.** The tree `CMS > HCAL > subdetector > readout box > channel`, with the
+  supply that powers each box and the FED that reads it. Click an element to open its
+  timeline.
+- **Calendar.** Fills, runs, the stop, as a table and a strip.
+- **Fault catalogue.** One card per fault mode. Each card explains the script in words and
+  then shows a real occurrence from the loaded Record as a table:
+
+  | What was written | Happened | Known to the Record |
+  |---|---|---|
+
+  This is the page for **Q1**. For each mode you can step through every occurrence.
+- **Build a Record.** Preset, seed, size budget, and a Build button. Shows what the
+  generator adjusted to fit the budget, and a before/after count by entry type.
+
+### 4.3 Record
+
+*Understand the database.*
+
+- **Tables.** The eight tables with row counts and a one-line description of each.
+- **Entries.** A table you can filter by class, source, type, kind, element and time, and
+  search by text. Counts update as you filter.
+- **Entry detail.** The full envelope, the payload, the producer, the source pointer,
+  links in and out, and any corrected versions.
+- **Incidents.** The list with status as of the time control; click to open one.
+
+### 4.4 Timeline
+
+*See what a fault looks like.*
+
+- Pick an element. Readings are drawn for it and its surroundings: voltage, temperature,
+  dead and hot channel fractions, occupancy. One quantity per panel.
+- **Zoom and pan,** with all panels moving together. A "fit to data in view" button
+  rescales the vertical axis, so a 0.35 V sag is visible next to a trip to 0 V.
+- Below the readings, the same strip as today's static plot: stable beams, downtime,
+  certified-bad ranges, state changes, fault events, logbook notes.
+- Hover a mark to read it; click it to open the entry.
+
+### 4.5 Incident
+
+*See how knowledge arrived.*
+
+- Header: status and the three labels (recovery, cause, certification), each shown as
+  "not known yet" until the time control passes its known-at time.
+- **Two rows on one time axis:** when each entry *happened* (top) and when it became
+  *known* (bottom), joined by a line. A root cause written two weeks later is a long
+  slanted line; a control-system reading is a vertical one.
+- The expert's links, each with its stated reason.
+- A "play" button steps the time control through each moment something became known.
+
+### 4.6 Time control (on every page)
+
+- A date and time field, a slider across the calendar, and two buttons: "previous thing
+  that became known" and "next thing that became known".
+- A small panel listing what the last step added (entries, labels, links).
+- A "compare with…" option that pins a second moment and marks what differs.
+
+### 4.7 Precedents
+
+*The page for **Q2**.*
+
+For one chosen problem at its ask time, two columns side by side:
+
+| Same element | Same symptom anywhere |
+|---|---|
+| earlier incidents on this element | earlier incidents of this kind on any element |
+
+Each row shows what was known about that earlier incident at the ask time: recovery,
+cause, or neither. A summary line counts, across the whole Record, how many problems
+would be called "known" under each rule. Run it on the `small` preset, where there are
+23 incidents and the two rules disagree.
+
+### 4.8 Read API
+
+*Operate the Record by hand.*
+
+- One form per read method that exists today: entries in a window, state at a time,
+  incidents, one incident's entries, links of an entry, element relations.
+- Run it and see the returned rows, the time it used, and the equivalent Python call to
+  copy.
+
+### 4.9 Planted answers (behind the switch)
+
+- The list of planted cases: mode, element, event time, ask time, expected verdict.
+- "Go to ask time" sets the time control so you can check the expectation against what
+  the Record shows.
+
+### 4.10 Later, after the orchestrator exists
+
+- **Tools.** The Read API page gains the five agent tools and a view of the query log,
+  with a "run again" button on every logged call.
+- **Agent.** Ask a question at a chosen moment; choose the scripted or the model brain;
+  watch each tool call and its result; read the structured proposal with every citation
+  linked to its entry. With the switch on, the expected verdict is shown beside it.
+- **Feed.** The four interface definitions, rendered as documentation.
+
+## 5. How it is built
+
+A new folder `viewer/`. It may import `utils`, `aggregator`, `example_device` (only for
+the Build button) and, later, `orchestrator`.
+
+```
+viewer/
+  server.py      local web service on the Python standard library, localhost only
+  api.py         one function per endpoint; each is a thin call to RecordStore
+  static/
+    index.html   one page, tabs for the sections above
+    app.js       plain JavaScript, no framework, no build step
+    style.css
+    vendor/      one charting library, copied in so it works offline
+```
+
+Command: `orchestra view [--db out/record.db] [--port 8765]`, which starts the service and
+prints the address to open.
+
+Choices made in this plan, and why:
+
+| Choice | Reason | Alternative considered |
+|---|---|---|
+| Local service plus a static page | the page shows results of the real read methods; no heavy dependency | Streamlit: quicker to write, but a large dependency and awkward for the linked two-row incident view |
+| No framework, no build step | anyone can open `app.js` and follow it; easy to hand over | React or similar: nicer for a large app, more to maintain |
+| One vendored chart library (uPlot, MIT licence) | small, fast on tens of thousands of points, has synchronized zoom | Plotly: more features, about 3 MB |
+| Read-only service; Build writes a new file | the Record on screen cannot be damaged by the GUI | editing in place |
+
+Every endpoint that reads the Record requires an `as_of` argument and refuses the call
+without it.
+
+## 6. Order of work
+
+Each step ends with something you can open and judge.
+
+| Step | Build | You can then |
+|---|---|---|
+| 1 | Service, page shell, time control, Home, Record pages | browse every entry and incident at any moment |
+| 2 | Timeline with zoom | look at each fault's readings and records together |
+| 3 | Incident page with the two-row view and play button | watch how knowledge about one incident arrived |
+| 4 | Device page: detector map, calendar, fault catalogue | **answer Q1** |
+| 5 | Planted answers and Precedents pages | **answer Q2** |
+| 6 | Build-a-Record controls and the Read API page | change the generator's inputs and query by hand |
+| 7 | Tools, Agent and Feed pages | after the orchestrator is built |
+
+Steps 1 to 5 use only code that exists today.
+
+## 7. How I will check it
+
+- **Automated:** each endpoint refuses a call without `as_of`; at sampled moments no
+  endpoint returns anything known later; the page loads and lists the incidents; the
+  Build endpoint never touches the loaded Record file.
+- **By eye:** I load each page in a browser and check it against the terminal commands
+  for the same Record. Where I cannot open a browser from this environment, I will say so
+  and the check is yours.
+- **Yours:** steps 4 and 5 exist for your judgment; nothing automated replaces it.
+
+## 8. Decisions needed before starting
+
+1. Is the list of pages right, or is something missing or unwanted?
+2. Is a local web page opened in your browser acceptable, or do you want something else
+   (for example a notebook)?
+3. Should the Build button be in the first version, or is building from the terminal
+   enough for now?

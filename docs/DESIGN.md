@@ -33,12 +33,12 @@ It is split into two parts on purpose:
 | The Record: database, write API, as-of read API | `aggregator/` | built, tested |
 | Text and plot viewing commands | `aggregator/view.py` | built, tested |
 | Synthetic device generator | `example_device/` | built, tested |
-| **Record browser and verification tools for people** | `viewer/` | **next, section 5** |
+| **GUI to understand and check the components** | `viewer/` | **next, section 5 and GUI_PLAN.md** |
 | Query tools and diagnosis agent | `orchestrator/` | designed, not built, section 6 |
 | Feed interfaces | `adapters/`, `anonymizer/`, `summarizer/`, `sparsifier/` | designed, not built, section 6 |
 
 The synthetic data has **not yet been reviewed by a detector expert**. That review is the
-reason section 5 comes before the agent.
+reason the GUI comes before the agent.
 
 ## 2. Words used here
 
@@ -187,104 +187,19 @@ orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
 - `planted.json` counts any earlier incident of the same mode as a precedent, even on a
   different element. See open question 2.
 
-## 5. Next: a Record browser and verification tools for people
+## 5. Next: a GUI to understand and check what has been built
 
-### 5.1 Why this comes next
+The prototype can currently be inspected only through terminal commands and static plots.
+Before more is built, people need to see inside each component and operate it by hand,
+and a detector expert needs to judge the synthetic data.
 
-Two things must be judged by people before more is built on top:
+The plan is in [GUI_PLAN.md](GUI_PLAN.md): a local, read-only web page in a new `viewer/`
+folder that shows the Record through the real read methods, with one time control on
+every page. It covers the device and its fault scripts, the Record, zoomable timelines,
+how knowledge about an incident arrived, a side-by-side comparison of the two possible
+precedent rules, and, once they exist, the query tools and the agent.
 
-1. **Is the synthetic data plausible?** Only a detector expert can say. If it is not,
-   an agent tuned on it is wasted work.
-2. **Can the tools be trusted?** The as-of rule is the foundation of every later claim.
-   Tests check it, but a co-investigator should be able to see it without reading tests.
-
-The command-line views answer these poorly: static plots cannot zoom, and comparing two
-as-of times means running a command twice and comparing text by eye.
-
-### 5.2 Who uses it
-
-| User | Wants to |
-|---|---|
-| Detector expert | look at one fault and say "that is, or is not, how this looks in reality" |
-| Project member | understand what a Record is and what as-of means, in ten minutes |
-| Developer | check a change did not break the data or leak the future |
-| Later: anyone reviewing the agent | see what the agent asked, what it got back, and whether its claims are supported |
-
-### 5.3 Principles
-
-- **Read-only.** The browser never writes to the Record.
-- **It shows the Record through the same read API the agent will use.** No second
-  implementation of as-of filtering in the browser. Otherwise we would be verifying the
-  viewer, not the tools.
-- **One as-of control governs every view.** Nothing on screen is ever from after it.
-- **Hidden answers stay visibly separate.** Anything from `planted.json` appears only
-  behind a clearly marked toggle, in a distinct style, off by default.
-- **Works offline** from a clone, on the `tiny` and `small` presets, with no build step.
-
-### 5.4 Views
-
-| # | View | Shows | Verifies |
-|---|---|---|---|
-| 1 | **Overview** | banner, settings, counts by class and type, a calendar strip of fills, the stop, downtime and incidents | the Record is what the generator said it wrote |
-| 2 | **Element** | the element tree and service relations; zoomable readings; the strip of beam, downtime, certification, state changes, events and notes; click a mark to read the entry | fault signatures look right; fixes the unreadable voltage sag |
-| 3 | **Incident** | labels and status; entries on two rows, *happened* and *known*, joined by lines; indirect links with their rationale | the gap between event and knowledge is what was intended |
-| 4 | **Time machine** | the as-of control with step buttons to "next thing that became known"; a diff of what just appeared | no leak; the configure-failure pair plays out as designed |
-| 5 | **Entry** | full envelope, payload, producer, source pointer, links, superseded versions | provenance is complete |
-| 6 | **Planted overlay** (toggle) | each planted case, its ask time, and the expected verdict next to what the Record shows at that time | the hidden answer list agrees with the Record |
-| 7 | **Agent session** (after section 6) | question, as-of, each tool call with its arguments and returned entries, the structured proposal with every citation linked to its entry, a "re-run this query" button, expected versus actual verdict | every claim is supported and re-runnable |
-
-Views 1 to 6 need only what exists today. View 7 is specified now so the orchestrator's
-session log is designed to feed it.
-
-### 5.5 A verification report on the command line
-
-`orchestra verify [--db FILE] [--planted FILE]` prints a plain-language pass/fail report
-on any Record file, without pytest:
-
-- structure: every entry has a known element, a producer, and is not known before it happened
-- the no-real-events guard
-- as-of: sampled moments return nothing from the future, for entries, links and labels
-- with `--planted`: every planted case is present and its expected answer agrees with the Record
-
-The same checks run in the browser's Overview as a status panel. One implementation in
-`viewer/checks.py`, used by the command, the browser and the tests.
-
-### 5.6 How to build it (recommended, not yet decided)
-
-A new folder `viewer/`:
-
-- `viewer/api.py`: a small read-only JSON service on the Python standard library
-  (`http.server`), bound to localhost. Each endpoint is a thin wrapper over a
-  `RecordStore` read method and requires `as_of`.
-- `viewer/static/`: one HTML page, plain JavaScript, one vendored charting library
-  (no CDN, so it works offline).
-- `viewer/checks.py`: the verification checks.
-- Commands: `orchestra view [--db FILE] [--port N]` and `orchestra verify`.
-
-Why this over the alternatives:
-
-| Option | For | Against |
-|---|---|---|
-| **Local service + static page** (recommended) | uses the real read API; no heavy dependency; no build step; ports to any facility | some hand-written JavaScript |
-| Streamlit or similar | fastest to write; Python only | heavy dependency; awkward for the linked two-row timeline; harder to hand to CMS maintainers |
-| One self-contained HTML export | zero install for co-investigators | must re-implement as-of filtering in the browser, which breaks the principle in 5.3 |
-
-A static export of a single incident or session, for e-mailing, could be added later as a
-snapshot at one fixed as-of time; that does not re-implement filtering.
-
-### 5.7 Order of work and done-when
-
-| Step | Deliver | Done when |
-|---|---|---|
-| A | `viewer/checks.py`, `orchestra verify` | report passes on `tiny` and `small`; a hand-corrupted Record fails with a clear message |
-| B | API, Overview, Element view | an expert can zoom to the voltage sag and read the entries behind any mark |
-| C | Incident view, time machine | stepping through the configure-failure pair shows recovery appearing 6 hours after the fix and the cause 6 days later, with nothing early |
-| D | Planted overlay | all planted cases in `small` agree with the Record |
-| E | **Expert review of the synthetic data** using B to D | written list of what is implausible; generator adjusted |
-| F | Agent session view | after section 6 |
-
-Tests for the viewer: API endpoints refuse a call without `as_of`; every endpoint, at
-sampled as-of times, returns nothing known later; the page loads and lists the incidents.
+It is a proposal awaiting the project lead's decisions, listed at its end.
 
 ## 6. After that: the agent and the feed interfaces
 
@@ -369,9 +284,9 @@ interfaces into running code.
 
 | # | Question | Blocks |
 |---|---|---|
-| 1 | Does the synthetic data look plausible: fault signatures, the delays before recovery and cause are written down, the logbook wording? | step E, and trust in everything after |
+| 1 | Does the synthetic data look plausible: fault signatures, the delays before recovery and cause are written down, the logbook wording? Needs the GUI first. | trust in everything after |
 | 2 | What counts as a precedent: the same element, or the same symptom anywhere in HCAL? | `planted.json` expectations, agent verdicts |
-| 3 | Is the local service plus static page (5.6) the right way to build the browser? | step B |
+| 3 | The three decisions at the end of GUI_PLAN.md | starting the GUI |
 | 4 | Should `viewer/` become a seventh repository in the organization, or live in `orchestrator`? | folder layout |
 | 5 | Logbook templates were accepted "to be revisited". Revisit before or after the agent? | how convincing recall looks |
 | 6 | Which model endpoint for the real-model run? | 6.2, second brain |
@@ -395,5 +310,4 @@ Read in this order: this document, `utils/entry.py`, `aggregator/schema.sql`,
 `aggregator/store.py` (read API at the bottom half), `example_device/plan.py`, then
 `example_device/generator.py`.
 
-Start with section 5.7 step A. It is small, touches only existing read methods, and
-its checks are reused by every later step.
+Start with step 1 of [GUI_PLAN.md](GUI_PLAN.md), once its open decisions are settled.
