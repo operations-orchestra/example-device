@@ -67,7 +67,7 @@ flowchart LR
     DEV[example_device<br/>synthetic generator]
     AGG[(aggregator<br/>the Record)]
     ORC[orchestrator<br/>tools + agent]
-    VW[viewer<br/>browser + verify]
+    VW[viewer<br/>GUI for people]
     PL[/planted.json<br/>hidden answers/]
 
     SU -. entries .-> AGG
@@ -94,7 +94,7 @@ each can move out later. `tests/test_boundaries.py` enforces who may import whom
 | `aggregator` | `utils` |
 | `example_device` | `utils`, `aggregator` |
 | `orchestrator` | `utils`, `aggregator` (never `example_device`: the agent must not see the generator) |
-| `viewer` | `utils`, `aggregator`, `orchestrator` |
+| `viewer` | `utils`, `aggregator`, `orchestrator`, and `example_device` only to build a new Record |
 
 SQL appears only in `aggregator/`. Everything else calls typed Python methods on
 `RecordStore`, so a move to PostgreSQL is a rewrite of one module.
