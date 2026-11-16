@@ -16,7 +16,8 @@ at 50001) and a test checks it.
 
 ## Status
 
-Work in progress on the branch `prototype/synthetic-record`.
+Work in progress on the branch `prototype/synthetic-record`. The design, the decisions
+behind it, the next steps and hand-off notes are in [docs/DESIGN.md](docs/DESIGN.md).
 
 | Folder | What it is | State |
 |---|---|---|
