@@ -41,21 +41,51 @@ what happens when you change something.
 2. **One time control at the top of every page.** Nothing shown is ever later than it.
 3. **The Record is never modified.** "Build a new Record" writes a new file in a scratch
    folder and switches the GUI to it.
-4. **The hidden answers are kept apart.** Anything from `planted.json` sits behind a
-   switch labelled "show planted answers", off by default, drawn in a distinct style.
+4. **Demo-only features are visibly separate from production-like ones.** See section 4.
 5. **Runs offline from a clone,** with one command and no build step.
 6. **Every page says "synthetic, not CMS data".**
 
-## 4. Pages
+## 4. Demo-only versus production-like
 
-### 4.1 Home
+Because the data is synthetic, we hold all the answers: we know which faults exist, where
+they are and what the right diagnosis is. A real Record has none of that. The GUI must
+make it obvious which features rely on that knowledge, so nobody mistakes a demo
+convenience for something the production system will have.
+
+Every page, panel and field carries one of three marks:
+
+| Mark | Meaning | Examples |
+|---|---|---|
+| **Production-like** (no badge, normal style) | Works the same on a Record built from real sources. Uses only what is in the Record. | Record pages, Timeline, Incident, time control, Read API, later the query tools and the agent |
+| **Expert-filled** (outlined badge) | Present in a real Record only where experts have reviewed an incident. Here the generator wrote it for every incident. | incident grouping, recovery and cause labels, links with a stated reason |
+| **Demo only** (coloured band and badge) | Exists only because the data is synthetic. Has no counterpart in production. | the Device page and its fault scripts, building a Record, planted answers, expected verdicts, the knowledge that a planned change is a trap |
+
+How this shows in the GUI:
+
+- The navigation is split into two groups, **Record** and **Demo only**.
+- A switch at the top, **"Production view"**, hides everything marked demo only. With it
+  on, the GUI shows exactly what an operator of a real Record would have.
+- Demo-only content never appears inside a production-like page unless the switch
+  "show planted answers" is on, and then it is drawn in the demo style.
+- The Home page states the split in two sentences and lists which pages fall where.
+
+One consequence for the Precedents page: "same symptom" must be worked out from what is
+in the Record (entry types, elements, wording), never from the generator's fault mode.
+The generator's fault mode may be shown beside it, as a demo-only column, to check the
+match.
+
+## 5. Pages
+
+In the headings below, **[R]** is production-like and **[D]** is demo only.
+
+### 5.1 Home [R]
 
 - What Record is loaded: preset, seed, size, date range.
 - A strip of the whole calendar: fills, the technical stop, downtime, incidents. Click
   anywhere to set the time control.
 - A diagram of the components (the one in DESIGN.md) where each box links to its page.
 
-### 4.2 Device
+### 5.2 Device [D]
 
 *Understand the generator.*
 
@@ -70,10 +100,12 @@ what happens when you change something.
   |---|---|---|
 
   This is the page for **Q1**. For each mode you can step through every occurrence.
-- **Build a Record.** Preset, seed, size budget, and a Build button. Shows what the
-  generator adjusted to fit the budget, and a before/after count by entry type.
+- **Build a Record.** Runs the generator from the page instead of the terminal: choose
+  preset, seed and size budget, press Build, and the GUI switches to the freshly generated
+  Record. It does not capture or save anything from the Record on screen; it makes a new
+  synthetic one. Useful for seeing how seed and size change the data.
 
-### 4.3 Record
+### 5.3 Record [R]
 
 *Understand the database.*
 
@@ -84,7 +116,7 @@ what happens when you change something.
   links in and out, and any corrected versions.
 - **Incidents.** The list with status as of the time control; click to open one.
 
-### 4.4 Timeline
+### 5.4 Timeline [R]
 
 *See what a fault looks like.*
 
@@ -96,7 +128,7 @@ what happens when you change something.
   certified-bad ranges, state changes, fault events, logbook notes.
 - Hover a mark to read it; click it to open the entry.
 
-### 4.5 Incident
+### 5.5 Incident [R, labels and links expert-filled]
 
 *See how knowledge arrived.*
 
@@ -108,14 +140,14 @@ what happens when you change something.
 - The expert's links, each with its stated reason.
 - A "play" button steps the time control through each moment something became known.
 
-### 4.6 Time control (on every page)
+### 5.6 Time control (on every page) [R]
 
 - A date and time field, a slider across the calendar, and two buttons: "previous thing
   that became known" and "next thing that became known".
 - A small panel listing what the last step added (entries, labels, links).
 - A "compare with…" option that pins a second moment and marks what differs.
 
-### 4.7 Precedents
+### 5.7 Precedents [R, with a demo-only check column]
 
 *The page for **Q2**.*
 
@@ -130,7 +162,7 @@ cause, or neither. A summary line counts, across the whole Record, how many prob
 would be called "known" under each rule. Run it on the `small` preset, where there are
 23 incidents and the two rules disagree.
 
-### 4.8 Read API
+### 5.8 Read API [R]
 
 *Operate the Record by hand.*
 
@@ -139,13 +171,13 @@ would be called "known" under each rule. Run it on the `small` preset, where the
 - Run it and see the returned rows, the time it used, and the equivalent Python call to
   copy.
 
-### 4.9 Planted answers (behind the switch)
+### 5.9 Planted answers [D]
 
 - The list of planted cases: mode, element, event time, ask time, expected verdict.
 - "Go to ask time" sets the time control so you can check the expectation against what
   the Record shows.
 
-### 4.10 Later, after the orchestrator exists
+### 5.10 Later, after the orchestrator exists [R, expected verdicts D]
 
 - **Tools.** The Read API page gains the five agent tools and a view of the query log,
   with a "run again" button on every logged call.
@@ -154,7 +186,7 @@ would be called "known" under each rule. Run it on the `small` preset, where the
   linked to its entry. With the switch on, the expected verdict is shown beside it.
 - **Feed.** The four interface definitions, rendered as documentation.
 
-## 5. How it is built
+## 6. How it is built
 
 A new folder `viewer/`. It may import `utils`, `aggregator`, `example_device` (only for
 the Build button) and, later, `orchestrator`.
@@ -185,13 +217,13 @@ Choices made in this plan, and why:
 Every endpoint that reads the Record requires an `as_of` argument and refuses the call
 without it.
 
-## 6. Order of work
+## 7. Order of work
 
 Each step ends with something you can open and judge.
 
 | Step | Build | You can then |
 |---|---|---|
-| 1 | Service, page shell, time control, Home, Record pages | browse every entry and incident at any moment |
+| 1 | Service, page shell, time control, the three marks and the "Production view" switch, Home, Record pages | browse every entry and incident at any moment |
 | 2 | Timeline with zoom | look at each fault's readings and records together |
 | 3 | Incident page with the two-row view and play button | watch how knowledge about one incident arrived |
 | 4 | Device page: detector map, calendar, fault catalogue | **answer Q1** |
@@ -201,7 +233,7 @@ Each step ends with something you can open and judge.
 
 Steps 1 to 5 use only code that exists today.
 
-## 7. How I will check it
+## 8. How I will check it
 
 - **Automated:** each endpoint refuses a call without `as_of`; at sampled moments no
   endpoint returns anything known later; the page loads and lists the incidents; the
@@ -211,10 +243,9 @@ Steps 1 to 5 use only code that exists today.
   and the check is yours.
 - **Yours:** steps 4 and 5 exist for your judgment; nothing automated replaces it.
 
-## 8. Decisions needed before starting
+## 9. Decisions
 
-1. Is the list of pages right, or is something missing or unwanted?
-2. Is a local web page opened in your browser acceptable, or do you want something else
-   (for example a notebook)?
-3. Should the Build button be in the first version, or is building from the terminal
-   enough for now?
+Settled on 16 November 2026: the page list is right; a local web page is the form; demo-only
+and production-like features must be clearly distinguished (section 4).
+
+Open: whether the Build control is wanted at all (step 6).
