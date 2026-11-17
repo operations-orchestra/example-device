@@ -162,11 +162,15 @@ svg .st-bad { fill: var(--critical); font-weight: 600; }
 
 .flow.ts { margin: 6px 0; } .flow.ts .box.src { border-style: dashed; border-color: var(--ink2); }
 .iface h3 { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; } .iface h4 { margin: 14px 0 4px; font-size: 14px; }
-.status { font-size: 11px; font-weight: 600; border: 1px dashed var(--ink2); color: var(--ink2); border-radius: 4px; padding: 0 6px; }
-.status.built { border: 1px solid var(--accent); color: var(--accent); }
+.ifstatus { font-size: 11px; font-weight: 600; border: 1px dashed var(--ink2); color: var(--ink2); border-radius: 4px; padding: 0 6px; }
+.ifstatus.built { border: 1px solid var(--accent); color: var(--accent); }
 .io { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; } .io pre { white-space: pre-wrap; margin: 4px 0; }
 @media (max-width: 900px) { .io { grid-template-columns: 1fr; } }
 table.sig { width: auto; min-width: 60%; } ul.sigs { margin: 4px 0; padding-left: 18px; } ul.sigs li { margin: 5px 0; }
 .explainer { background: var(--demo-bg); border-left: 4px solid var(--demo); border-radius: 0 6px 6px 0; padding: 7px 12px; margin: 0 0 14px; font-size: 13px; max-width: 100ch; }
 nav a.navtop.demo .n { background: var(--demo); color: #fff; } .demo-key { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--demo); vertical-align: -1px; }
 ul.rules { margin: 4px 0 10px; } ul.rules li { margin: 3px 0; max-width: 100ch; }
+svg .pending { fill: var(--grid); stroke: var(--axis); stroke-dasharray: 3 2; }
+.role { display: inline-block; font-size: 11px; border-radius: 4px; padding: 0 6px; border: 1px solid var(--axis); }
+.role-filed, .role-reported { background: var(--grid); } .role-cause { border-color: var(--critical); color: var(--critical); font-weight: 600; }
+.role-suspected { border-color: var(--serious); border-style: dashed; } .role-affected { border-color: var(--s1); }

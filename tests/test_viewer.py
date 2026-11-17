@@ -152,7 +152,8 @@ def test_tables_page_shows_raw_rows_only_as_known(call, tiny, store):
     as_of = second["ask_at"]
     status, body = call("tables", as_of=as_of, incident=first["incident_id"])
     assert status == 200 and [t["name"] for t in body["tables"]] == [
-        "element", "element_relation", "entry", "link", "incident", "incident_entry", "query_log", "meta"]
+        "element", "element_relation", "entry", "part_ref", "link", "incident", "incident_entry",
+        "fill", "run", "beam_mode", "certification", "query_log", "meta"]
     by_name = {t["name"]: t for t in body["tables"]}
     assert by_name["entry"]["count"] == store.count_entries(as_of) < store.count_entries(store.latest_known_at())
     for name in ("entry", "link", "incident", "incident_entry"):
@@ -223,7 +224,7 @@ def test_built_page_examples_are_real_rows(call, store, end):
     assert ex["voltage"]["type"] == "lv_voltage_status" and ex["voltage"]["payload"]["value"] == "drifting down"
     assert ex["voltage"]["raw_ref"].startswith("source://control_archive/")
     assert body["archive"]["channels"] == 8 and body["share"]["status"] < body["share"]["total"]
-    assert ex["quality"]["type"] == "occupancy_summary" and ex["note"]["type"] == "shift_note"
+    assert ex["quality"]["type"] == "quality_status" and ex["note"]["type"] == "shift_note"
     assert store.get_entry(ex["voltage"]["id"], end).payload == ex["voltage"]["payload"]
     assert body["incident_example"]["n_links"] > 0
     # every "where in the code" link resolves to a real line

@@ -392,3 +392,8 @@ clicking through a replay (step, Play, jumps, Exit), drag-to-zoom, and the answe
   skeleton code by `viewer/api.py` (`interfaces`), with what it takes and gives, its data
   records, contracts and method signatures linked to the source, the implementations still to
   write, and one real entry of the kind it would produce.
+- **After the Record was slimmed down** (aggregator/README.md, "Changes on 17 November 2026"):
+  timelines fetch per-run data quality from the data-quality archive and add "Quality status"
+  and "Not certified yet" rows; beams and runs come from the calendar tables; entries, incidents
+  and the replay page list the parts they concern, with roles and times; the map shows an open
+  issue on every part it concerns; the Tables page shows the five new tables.

@@ -1,6 +1,7 @@
 """Two candidate rules for "has this been seen before?", computed only from the Record.
 
-Rule A  same element:  an earlier incident on the same element.
+Rule A  shares a part: an earlier incident that concerns one of the same parts (reported,
+                       affected, suspected or cause), as far as both were known then.
 Rule B  same symptom:  an earlier incident, on any element, whose symptom entries are of
                        the same kind as this problem's.
 
@@ -36,6 +37,10 @@ def _symptoms(store: RecordStore, incident_id: int, as_of: int) -> list[StoredEn
     return [e for role, e in store.incident_entries(incident_id, as_of) if role == "symptom"]
 
 
+def _parts(store: RecordStore, incident_id: int, as_of: int) -> set[str]:
+    return {r.element for r in store.parts(as_of, incident_id=incident_id) if r.status != "rejected"}
+
+
 def ask_time(store: RecordStore, incident_id: int, as_of: int) -> Optional[int]:
     """Five minutes after the first symptom of this problem reached the Record."""
     symptoms = _symptoms(store, incident_id, as_of)
@@ -50,13 +55,15 @@ def compare(store: RecordStore, incident_id: int, as_of: int) -> dict[str, Any]:
     asked = min(ask_time(store, incident_id, as_of) or as_of, as_of)   # never later than the time control
     kinds = sorted({k for k in map(symptom_kind, _symptoms(store, incident_id, as_of)) if k})
     same_element, same_symptom = [], []
+    mine = _parts(store, problem.id, asked) or {problem.element}
     for earlier in store.incidents(asked):
         if earlier.id == problem.id or earlier.t_start >= problem.t_start:
             continue
         earlier_kinds = {k for k in map(symptom_kind, _symptoms(store, earlier.id, asked)) if k}
+        shared = sorted(_parts(store, earlier.id, asked) & mine)
         row = {**asdict(earlier), "symptom_kinds": sorted(earlier_kinds),
-               "shared_kinds": sorted(earlier_kinds & set(kinds))}
-        if earlier.element == problem.element:
+               "shared_kinds": sorted(earlier_kinds & set(kinds)), "shared_parts": shared}
+        if shared:
             same_element.append(row)
         if row["shared_kinds"]:
             same_symptom.append(row)
@@ -95,13 +102,15 @@ def at_moment(store: RecordStore, incident_id: int, as_of: int) -> dict[str, Any
     seen = [e for e in _symptoms(store, incident_id, end) if e.known_at <= as_of]
     kinds = sorted({k for k in map(symptom_kind, seen) if k})
     same_element, same_symptom = [], []
+    mine = _parts(store, incident_id, as_of) or {frame["element"]}
     for earlier in store.incidents(as_of):
         if earlier.id == incident_id or earlier.t_start >= frame["t_start"]:
             continue
         earlier_kinds = {k for k in map(symptom_kind, _symptoms(store, earlier.id, as_of)) if k}
+        shared = sorted(_parts(store, earlier.id, as_of) & mine)
         row = {**asdict(earlier), "symptom_kinds": sorted(earlier_kinds),
-               "shared_kinds": sorted(earlier_kinds & set(kinds))}
-        if earlier.element == frame["element"]:
+               "shared_kinds": sorted(earlier_kinds & set(kinds)), "shared_parts": shared}
+        if shared:
             same_element.append(row)
         if row["shared_kinds"]:
             same_symptom.append(row)

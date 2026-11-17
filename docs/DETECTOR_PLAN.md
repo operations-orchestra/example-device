@@ -110,7 +110,7 @@ found it becomes a cmscoord layer and the overlay is dropped.
 | Stage | Build | Done when |
 |---|---|---|
 | A | `detector/` interface; toy implementation from `example_device/model.py` | everything reads the detector through the interface; all tests still pass; the GUI looks the same |
-| B | Several parts per entry and per incident (to-do 7b) | the generator can name a box and its supply on one cause; the "same element" precedent rule becomes "shares a part" |
+| B | Several parts per entry and per incident (to-do 7b). **Done 17 November 2026 on the toy detector, as `part_ref`.** | the generator can name a box and its supply on one cause; the "same element" precedent rule becomes "shares a part" |
 | C | cmscoord adapter on its synthetic fixture; the low-voltage overlay | the generator plants its faults on cmscoord parts (RBX, crate/slot, FED); the detector page draws the frontend and backend views; the GUI links to cmscoord's own GUI for cross-view checks |
 | D | Time-dependent maps: time to run, run to map version | a replay before and after a recabling shows the map in force at each moment |
 | E | A real HCAL map, local only | the generator runs on the real structure; nothing from the real map is committed |

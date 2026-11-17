@@ -112,3 +112,63 @@ CREATE TABLE query_log (
     as_of      INTEGER NOT NULL,
     result_ids TEXT NOT NULL
 );
+
+-- ------------------------------------------------------------------ the calendar
+-- Fills, runs and beam modes are the time axis, not events, so they are not entries.
+-- A fill or run is known when it starts; its end fields are known at end_known_at.
+CREATE TABLE fill (
+    number       INTEGER PRIMARY KEY,
+    t_start      INTEGER NOT NULL,
+    t_end        INTEGER,
+    end_known_at INTEGER
+);
+
+CREATE TABLE run (
+    number       INTEGER PRIMARY KEY,
+    fill         INTEGER REFERENCES fill (number),
+    t_start      INTEGER NOT NULL,
+    t_end        INTEGER,
+    n_ls         INTEGER,
+    stop_reason  TEXT,
+    end_known_at INTEGER
+);
+CREATE INDEX run_time ON run (t_start);
+
+-- A beam mode holds from t_start until the next one; known at t_start.
+CREATE TABLE beam_mode (
+    t_start INTEGER PRIMARY KEY,
+    mode    TEXT NOT NULL
+);
+
+-- When certification of a run was completed for a subdetector. Only bad lumisection ranges
+-- are stored, as entries. As of a moment, a lumisection is bad if a bad range covers it,
+-- good if certification was completed and none does, and not certified yet otherwise.
+CREATE TABLE certification (
+    run          INTEGER NOT NULL REFERENCES run (number),
+    element_id   INTEGER NOT NULL REFERENCES element (id),
+    completed_at INTEGER NOT NULL,
+    PRIMARY KEY (run, element_id)
+);
+
+-- ------------------------------------------------------------- part references
+-- Every part an entry or an incident concerns, each with a role and its own known-at time:
+-- a cause may be named days after the incident is opened.
+--   entry roles:    filed (exactly one: where the source filed it), mentioned, affected,
+--                   suspected, cause
+--   incident roles: reported (where it showed up), affected, suspected, cause
+-- entry.element_id and incident.element_id remain as a copy of the filed / reported part.
+CREATE TABLE part_ref (
+    id               INTEGER PRIMARY KEY,
+    entry_id         INTEGER REFERENCES entry (id),
+    incident_id      INTEGER REFERENCES incident (id),
+    element_id       INTEGER NOT NULL REFERENCES element (id),
+    role             TEXT NOT NULL,
+    known_at         INTEGER NOT NULL,
+    producer         TEXT NOT NULL,
+    producer_version TEXT NOT NULL,
+    status           TEXT NOT NULL CHECK (status IN ('proposed', 'confirmed', 'rejected')),
+    CHECK ((entry_id IS NULL) <> (incident_id IS NULL))
+);
+CREATE INDEX part_ref_element ON part_ref (element_id, known_at);
+CREATE INDEX part_ref_entry ON part_ref (entry_id);
+CREATE INDEX part_ref_incident ON part_ref (incident_id);

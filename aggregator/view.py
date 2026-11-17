@@ -97,7 +97,7 @@ def scope(store: RecordStore, element: str) -> tuple[list[str], list[str]]:
 
 def plot_element(store: RecordStore, element: str, out_path: str | Path,
                  t0: Optional[int] = None, t1: Optional[int] = None,
-                 as_of: Optional[int] = None, series=None) -> Path:
+                 as_of: Optional[int] = None, series=None, quality=None) -> Path:
     """Save a PNG timeline for one element: readings on top, what people recorded below.
 
     Readings are not in the Record. ``series(box, quantity, t0, t1, as_of)`` fetches them from
@@ -142,11 +142,14 @@ def plot_element(store: RecordStore, element: str, out_path: str | Path,
                 if len(shown) == 1 and pts:
                     ax.fill_between(xs, [q["lo"] for q in pts], [q["hi"] for q in pts], color=colour, alpha=0.15, lw=0)
                 continue
-            es = store.entries(as_of, elements=[box], t0=t0, t1=t1, types=[etype])
-            if etype == "occupancy_summary":       # one flat segment per run
-                for n, e in enumerate(es):
-                    ax.plot([dt(e.t_start), dt(e.t_end)], [e.payload[key]] * 2, color=colour, lw=2,
+            if etype == "occupancy_summary":       # one flat segment per run, from the data-quality source
+                for n, r in enumerate(quality(box, t0, t1, as_of) if quality else []):
+                    ax.plot([dt(r["t_start"]), dt(r["t_end"])], [r[key]] * 2, color=colour, lw=2,
                             solid_capstyle="butt", label=box if n == 0 else None)
+                continue
+            es = store.entries(as_of, elements=[box], t0=t0, t1=t1, types=[etype])
+            if False:
+                pass
             else:
                 xs = [dt((e.t_start + e.t_end) // 2) for e in es]
                 ax.plot(xs, [e.payload[key] for e in es], color=colour, lw=2, label=box)
@@ -176,17 +179,16 @@ def plot_element(store: RecordStore, element: str, out_path: str | Path,
                        mec=colour if line else SURFACE, mew=2 if line else 1, ls="")
 
     exp = store.ancestors(element)[-1] if store.ancestors(element) else element
-    beam = store.entries(as_of, elements=[exp], types=["beam_mode"])
-    for cur, nxt in zip(beam, beam[1:] + [None]):
-        if cur.payload["value"] == "STABLE BEAMS":
-            bar("Stable beams", cur.t_start, nxt.t_start if nxt else min(t1, as_of), NEUTRAL_FILL)
+    for b in store.beam_modes(as_of):
+        if b["mode"] == "STABLE BEAMS":
+            bar("Stable beams", b["t_start"], b["t_end"] if b["t_end"] else min(t1, as_of), NEUTRAL_FILL)
     for e in store.entries(as_of, elements=marks, t0=t0, t1=t1):
         if e.type == "downtime":
             bar("Downtime", e.t_start, e.t_end, CRITICAL)
         elif e.type == "cert_flag":
             for a, b in e.payload["bad_ls"]:
                 bar("Certified bad", e.t_start + (a - 1) * ls_s, e.t_start + b * ls_s, SERIOUS)
-        elif e.kind == "state" and e.type != "beam_mode" and e.t_start > span[0]:
+        elif e.kind == "state" and e.t_start > span[0]:
             tick("State change", e.t_start, INK_2, "D")
         elif e.type in ("fed_out_of_sync", "data_integrity_errors", "config_change"):
             tick("Fault event", e.t_start, CRITICAL if e.type != "config_change" else INK_2, "v")

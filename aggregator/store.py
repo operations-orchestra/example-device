@@ -15,10 +15,13 @@ from typing import Any, Iterable, Optional, Sequence
 
 from utils import Entry, LINK_STATUSES, LINK_TYPES
 
-SCHEMA_VERSION = "0.1"
+SCHEMA_VERSION = "0.2"
 _SCHEMA = Path(__file__).with_name("schema.sql")
 
 INCIDENT_LABELS = ("recovery_action", "confirmed_cause", "certification")
+ENTRY_ROLES = ("filed", "mentioned", "affected", "suspected", "cause")
+INCIDENT_ROLES = ("reported", "affected", "suspected", "cause")
+PART_STATUSES = ("proposed", "confirmed", "rejected")
 _LABEL_COLUMNS = {
     "recovery_action": ("recovery_action", "recovery_known_at"),
     "confirmed_cause": ("confirmed_cause", "cause_known_at"),
@@ -61,6 +64,20 @@ class IncidentView:
     recovery_action: Optional[str]
     confirmed_cause: Optional[str]
     certification: Optional[str]
+
+
+@dataclass(frozen=True)
+class PartRef:
+    """A part an entry or incident concerns, as known at one moment."""
+
+    id: int
+    element: str
+    role: str
+    known_at: int
+    producer: str
+    status: str
+    entry_id: Optional[int]
+    incident_id: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -149,6 +166,7 @@ class RecordStore:
         )
 
     def add_entry(self, entry: Entry, supersedes: Optional[int] = None) -> int:
+        """Write an entry and its "filed" part reference (the part the source filed it under)."""
         cur = self._db.execute(
             "INSERT INTO entry (source, record_class, kind, type, element_id, t_start, t_end, "
             "known_at, payload, raw_ref, producer, producer_version, review_status, supersedes) "
@@ -160,7 +178,49 @@ class RecordStore:
                 entry.producer_version, entry.review_status, supersedes,
             ),
         )
+        self.add_part_ref(entry.element, "filed", entry.known_at, entry.producer, entry.producer_version,
+                          entry_id=cur.lastrowid)
         return cur.lastrowid
+
+    def add_part_ref(self, element: str, role: str, known_at: int, producer: str, producer_version: str = "",
+                     entry_id: Optional[int] = None, incident_id: Optional[int] = None,
+                     status: str = "confirmed") -> int:
+        """Record that an entry or an incident concerns a part, in a role, from ``known_at`` on."""
+        if (entry_id is None) == (incident_id is None):
+            raise ValueError("a part reference belongs to exactly one entry or one incident")
+        roles = ENTRY_ROLES if entry_id is not None else INCIDENT_ROLES
+        if role not in roles:
+            raise ValueError(f"role {role!r} not in {roles}")
+        if status not in PART_STATUSES:
+            raise ValueError(f"status {status!r} not in {PART_STATUSES}")
+        if role in ("filed", "reported") and self._db.execute(
+                "SELECT 1 FROM part_ref WHERE role = ? AND (entry_id = ? OR incident_id = ?)",
+                (role, entry_id, incident_id)).fetchone():
+            raise ValueError(f"there is already a {role!r} part")
+        cur = self._db.execute(
+            "INSERT INTO part_ref (entry_id, incident_id, element_id, role, known_at, producer, producer_version, status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (entry_id, incident_id, self._eid(element), role, known_at, producer, producer_version, status))
+        return cur.lastrowid
+
+    # -- the calendar --------------------------------------------------------------------
+    def add_fill(self, number: int, t_start: int, t_end: int, end_known_at: Optional[int] = None) -> None:
+        self._db.execute("INSERT INTO fill (number, t_start, t_end, end_known_at) VALUES (?, ?, ?, ?)",
+                         (number, t_start, t_end, t_end if end_known_at is None else end_known_at))
+
+    def add_run(self, number: int, fill: int, t_start: int, t_end: int, n_ls: int, stop_reason: str,
+                end_known_at: Optional[int] = None) -> None:
+        self._db.execute(
+            "INSERT INTO run (number, fill, t_start, t_end, n_ls, stop_reason, end_known_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (number, fill, t_start, t_end, n_ls, stop_reason, t_end if end_known_at is None else end_known_at))
+
+    def add_beam_mode(self, t_start: int, mode: str) -> None:
+        self._db.execute("INSERT INTO beam_mode (t_start, mode) VALUES (?, ?)", (t_start, mode))
+
+    def add_certification(self, run: int, subdetector: str, completed_at: int) -> None:
+        """Certification of this run for this subdetector was completed (bad ranges are entries)."""
+        self._db.execute("INSERT INTO certification (run, element_id, completed_at) VALUES (?, ?, ?)",
+                         (run, self._eid(subdetector), completed_at))
 
     def add_entries(self, entries: Iterable[Entry]) -> list[int]:
         return [self.add_entry(e) for e in entries]
@@ -186,11 +246,15 @@ class RecordStore:
         )
         return cur.lastrowid
 
-    def open_incident(self, title: str, element: str, t_start: int, known_at: int) -> int:
+    def open_incident(self, title: str, element: str, t_start: int, known_at: int,
+                      producer: str = "", producer_version: str = "") -> int:
+        """Open an incident and its "reported" part reference (where the problem showed up)."""
         cur = self._db.execute(
             "INSERT INTO incident (title, element_id, t_start, known_at) VALUES (?, ?, ?, ?)",
             (title, self._eid(element), t_start, known_at),
         )
+        self.add_part_ref(element, "reported", known_at, producer or "incident", producer_version,
+                          incident_id=cur.lastrowid)
         return cur.lastrowid
 
     def _set_once(self, incident_id: int, values: dict[str, Any]) -> None:
@@ -303,7 +367,7 @@ class RecordStore:
 
     # --------------------------------------------------------------- entries
     def _entry_filter(self, as_of: int, elements=None, t0=None, t1=None, types=None, kinds=None,
-                      record_classes=None, sources=None, text=None) -> tuple[str, dict[str, Any]]:
+                      record_classes=None, sources=None, text=None, parts=None) -> tuple[str, dict[str, Any]]:
         where = ["e.known_at <= :as_of", _NOT_SUPERSEDED]
         params: dict[str, Any] = {"as_of": as_of}
 
@@ -333,6 +397,13 @@ class RecordStore:
         if text:
             where.append("LOWER(e.payload) LIKE :text")
             params["text"] = f"%{text.lower()}%"
+        if parts is not None:                 # entries that concern any of these parts, in any role known by as_of
+            names = []
+            for i, n in enumerate(parts):
+                params[f"pt{i}"] = self._eid(n)
+                names.append(f":pt{i}")
+            where.append("EXISTS (SELECT 1 FROM part_ref r WHERE r.entry_id = e.id AND r.known_at <= :as_of "
+                         f"AND r.status <> 'rejected' AND r.element_id IN ({', '.join(names) or 'NULL'}))")
         return " AND ".join(where), params
 
     def entries(self, as_of: int, elements: Optional[Sequence[str]] = None,
@@ -341,13 +412,13 @@ class RecordStore:
                 record_classes: Optional[Sequence[str]] = None,
                 limit: Optional[int] = None, sources: Optional[Sequence[str]] = None,
                 text: Optional[str] = None, offset: int = 0,
-                newest_first: bool = False) -> list[StoredEntry]:
+                newest_first: bool = False, parts: Optional[Sequence[str]] = None) -> list[StoredEntry]:
         """Entries known by ``as_of`` whose event time overlaps [t0, t1], oldest first.
 
         ``text`` matches anywhere in the payload, ignoring case.
         """
         where, params = self._entry_filter(as_of, elements, t0, t1, types, kinds,
-                                           record_classes, sources, text)
+                                           record_classes, sources, text, parts)
         order = "e.t_start DESC, e.id DESC" if newest_first else "e.t_start, e.id"
         sql = (f"SELECT {_ENTRY_COLS} FROM entry e JOIN element el ON el.id = e.element_id "
                f"WHERE {where} ORDER BY {order}")
@@ -357,9 +428,9 @@ class RecordStore:
         return [_entry(r) for r in self._db.execute(sql, params)]
 
     def count_entries(self, as_of: int, elements=None, t0=None, t1=None, types=None, kinds=None,
-                      record_classes=None, sources=None, text=None) -> int:
+                      record_classes=None, sources=None, text=None, parts=None) -> int:
         where, params = self._entry_filter(as_of, elements, t0, t1, types, kinds,
-                                           record_classes, sources, text)
+                                           record_classes, sources, text, parts)
         return self._db.execute(f"SELECT COUNT(*) FROM entry e WHERE {where}", params).fetchone()[0]
 
     def counts_by_type(self, as_of: int) -> list[tuple[str, str, str, str, int]]:
@@ -397,13 +468,15 @@ class RecordStore:
         parts, params = [], []
         if incident_id is None:
             parts += ["SELECT known_at AS k FROM entry", "SELECT known_at FROM link",
-                      "SELECT known_at FROM incident_entry"]
+                      "SELECT known_at FROM incident_entry", "SELECT known_at FROM part_ref",
+                      "SELECT completed_at FROM certification", "SELECT t_start FROM run",
+                      "SELECT end_known_at FROM run", "SELECT t_start FROM beam_mode"]
             parts += [f"SELECT {c} FROM incident" for c in self._INCIDENT_TIMES]
         else:
             parts += ["SELECT ie.known_at AS k FROM incident_entry ie WHERE ie.incident_id = ?",
                       "SELECT e.known_at FROM incident_entry ie JOIN entry e ON e.id = ie.entry_id "
-                      "WHERE ie.incident_id = ?"]
-            params += [incident_id, incident_id]
+                      "WHERE ie.incident_id = ?", "SELECT known_at FROM part_ref WHERE incident_id = ?"]
+            params += [incident_id, incident_id, incident_id]
             for c in self._INCIDENT_TIMES:
                 parts.append(f"SELECT {c} FROM incident WHERE id = ?")
                 params.append(incident_id)
@@ -415,6 +488,7 @@ class RecordStore:
 
     def became_known(self, t_from: int, t_to: int, limit: int = 200) -> dict[str, Any]:
         """What the Record learned in (t_from, t_to]: entries, incident changes, links."""
+        changes_extra: list[dict[str, Any]] = []
         entries = [_entry(r) for r in self._db.execute(
             f"SELECT {_ENTRY_COLS} FROM entry e JOIN element el ON el.id = e.element_id "
             "WHERE e.known_at > ? AND e.known_at <= ? ORDER BY e.known_at, e.id LIMIT ?",
@@ -423,7 +497,12 @@ class RecordStore:
             "SELECT COUNT(*) FROM entry WHERE known_at > ? AND known_at <= ?", (t_from, t_to)).fetchone()[0]
         n_links = self._db.execute(
             "SELECT COUNT(*) FROM link WHERE known_at > ? AND known_at <= ?", (t_from, t_to)).fetchone()[0]
-        changes = []
+        for row in self._db.execute(
+                "SELECT r.incident_id, i.title, el.name, r.role, r.known_at FROM part_ref r "
+                "JOIN incident i ON i.id = r.incident_id JOIN element el ON el.id = r.element_id "
+                "WHERE r.role <> 'reported' AND r.known_at > ? AND r.known_at <= ?", (t_from, t_to)):
+            changes_extra.append({"incident_id": row[0], "title": row[1], "what": f"{row[3]} part: {row[2]}", "t": row[4]})
+        changes = changes_extra
         labels = {"known_at": "incident opened", "recovery_known_at": "recovery action recorded",
                   "cause_known_at": "cause confirmed", "certification_known_at": "certification recorded",
                   "closed_known_at": "incident closed"}
@@ -459,6 +538,59 @@ class RecordStore:
             "SELECT DISTINCT type FROM entry WHERE element_id = ? AND kind = 'state' "
             "AND known_at <= ? ORDER BY type", (self._eid(element), as_of))
         return [r[0] for r in rows]
+
+    def parts(self, as_of: int, entry_id: Optional[int] = None, incident_id: Optional[int] = None) -> list[PartRef]:
+        """The parts an entry or an incident concerns, as known by ``as_of``, oldest first."""
+        col, value = ("entry_id", entry_id) if entry_id is not None else ("incident_id", incident_id)
+        rows = self._db.execute(
+            "SELECT r.id, el.name, r.role, r.known_at, r.producer, r.status, r.entry_id, r.incident_id "
+            f"FROM part_ref r JOIN element el ON el.id = r.element_id WHERE r.{col} = ? AND r.known_at <= ? "
+            "ORDER BY r.known_at, r.id", (value, as_of))
+        return [PartRef(*r) for r in rows]
+
+    def runs(self, as_of: int, t0: Optional[int] = None, t1: Optional[int] = None) -> list[dict[str, Any]]:
+        """Runs started by ``as_of`` (overlapping [t0, t1] if given). End fields are None until known."""
+        rows = self._db.execute(
+            "SELECT number, fill, t_start, t_end, n_ls, stop_reason, end_known_at FROM run "
+            "WHERE t_start <= ? AND (? IS NULL OR COALESCE(t_end, t_start) >= ?) AND (? IS NULL OR t_start <= ?) "
+            "ORDER BY t_start", (as_of, t0, t0, t1, t1))
+        out = []
+        for number, fill, a, b, n_ls, reason, known in rows:
+            ended = known is not None and known <= as_of
+            out.append({"run": number, "fill": fill, "t_start": a, "t_end": b if ended else None,
+                        "n_ls": n_ls if ended else None, "stop_reason": reason if ended else None})
+        return out
+
+    def fills(self, as_of: int) -> list[dict[str, Any]]:
+        rows = self._db.execute("SELECT number, t_start, t_end, end_known_at FROM fill WHERE t_start <= ? ORDER BY t_start",
+                                (as_of,))
+        return [{"fill": n, "t_start": a, "t_end": b if k is not None and k <= as_of else None} for n, a, b, k in rows]
+
+    def beam_modes(self, as_of: int) -> list[dict[str, Any]]:
+        """Beam-mode periods known by ``as_of``; the last one is still going (t_end None)."""
+        rows = list(self._db.execute("SELECT t_start, mode FROM beam_mode WHERE t_start <= ? ORDER BY t_start", (as_of,)))
+        return [{"t_start": a, "t_end": rows[i + 1][0] if i + 1 < len(rows) else None, "mode": m}
+                for i, (a, m) in enumerate(rows)]
+
+    def certification(self, as_of: int, subdetectors: Optional[Sequence[str]] = None) -> list[dict[str, Any]]:
+        """Every run whose certification was completed by ``as_of``, per subdetector."""
+        sql = ("SELECT c.run, el.name, c.completed_at FROM certification c JOIN element el ON el.id = c.element_id "
+               "WHERE c.completed_at <= ?")
+        params: list[Any] = [as_of]
+        if subdetectors is not None:
+            ids = [self._eid(n) for n in subdetectors]
+            sql += f" AND c.element_id IN ({', '.join('?' for _ in ids) or 'NULL'})"
+            params += ids
+        return [{"run": r, "subdetector": n, "completed_at": t} for r, n, t in self._db.execute(sql + " ORDER BY c.run", params)]
+
+    def lumisection_status(self, run: int, subdetector: str, ls: int, as_of: int) -> str:
+        """'bad', 'good' or 'not certified yet', as the Record knew it at ``as_of``."""
+        for e in self.entries(as_of, elements=[subdetector], types=["cert_flag"]):
+            if e.payload.get("run") == run and any(a <= ls <= b for a, b in e.payload.get("bad_ls", [])):
+                return "bad"
+        done = self._db.execute("SELECT 1 FROM certification WHERE run = ? AND element_id = ? AND completed_at <= ?",
+                                (run, self._eid(subdetector), as_of)).fetchone()
+        return "good" if done else "not certified yet"
 
     def links(self, entry_id: int, as_of: int) -> list[LinkView]:
         """Links touching an entry. Both ends must also be known by ``as_of``."""
@@ -505,10 +637,11 @@ class RecordStore:
         """All incidents known by ``as_of`` (open and closed), oldest first."""
         sql = self._INCIDENT_SQL + "WHERE i.known_at <= ?"
         params: list[Any] = [as_of]
-        if elements is not None:
+        if elements is not None:          # incidents that concern these parts, in any role known by as_of
             ids = [self._eid(n) for n in elements]
-            sql += f" AND i.element_id IN ({', '.join('?' for _ in ids)})"
-            params += ids
+            sql += (" AND EXISTS (SELECT 1 FROM part_ref r WHERE r.incident_id = i.id AND r.known_at <= ? "
+                    f"AND r.status <> 'rejected' AND r.element_id IN ({', '.join('?' for _ in ids) or 'NULL'}))")
+            params += [as_of] + ids
         sql += " ORDER BY i.t_start, i.id"
         return [self._incident_view(r, as_of) for r in self._db.execute(sql, params)]
 
@@ -564,8 +697,8 @@ class RecordStore:
         """Every moment at which the Record learned something about this incident. Times only."""
         parts = ["SELECT ie.known_at AS k FROM incident_entry ie WHERE ie.incident_id = ?",
                  "SELECT e.known_at FROM incident_entry ie JOIN entry e ON e.id = ie.entry_id "
-                 "WHERE ie.incident_id = ?"]
-        params = [incident_id, incident_id]
+                 "WHERE ie.incident_id = ?", "SELECT known_at FROM part_ref WHERE incident_id = ?"]
+        params = [incident_id, incident_id, incident_id]
         for c in self._INCIDENT_TIMES:
             parts.append(f"SELECT {c} FROM incident WHERE id = ?")
             params.append(incident_id)
@@ -602,6 +735,11 @@ class RecordStore:
             "link": one("SELECT COUNT(*) FROM link WHERE known_at <= ?", as_of),
             "incident": one("SELECT COUNT(*) FROM incident WHERE known_at <= ?", as_of),
             "incident_entry": one("SELECT COUNT(*) FROM incident_entry WHERE known_at <= ?", as_of),
+            "part_ref": one("SELECT COUNT(*) FROM part_ref WHERE known_at <= ?", as_of),
+            "fill": one("SELECT COUNT(*) FROM fill WHERE t_start <= ?", as_of),
+            "run": one("SELECT COUNT(*) FROM run WHERE t_start <= ?", as_of),
+            "beam_mode": one("SELECT COUNT(*) FROM beam_mode WHERE t_start <= ?", as_of),
+            "certification": one("SELECT COUNT(*) FROM certification WHERE completed_at <= ?", as_of),
             "query_log": one("SELECT COUNT(*) FROM query_log"),
             "meta": one("SELECT COUNT(*) FROM meta"),
         }
@@ -621,6 +759,16 @@ class RecordStore:
                                "(SELECT MIN(rowid) FROM incident_entry WHERE known_at <= ? GROUP BY role) "
                                "ORDER BY incident_id, entry_id LIMIT ?", (as_of, as_of, limit + 2)),
             "query_log": ("SELECT * FROM query_log ORDER BY id LIMIT ?", (limit,)),
+            "part_ref": ("SELECT * FROM part_ref WHERE known_at <= ? AND id IN (SELECT MIN(id) FROM part_ref "
+                         "WHERE known_at <= ? GROUP BY role, entry_id IS NULL) ORDER BY id LIMIT ?", (as_of, as_of, limit + 3)),
+            "fill": ("SELECT number, t_start, CASE WHEN end_known_at <= ? THEN t_end END AS t_end, end_known_at "
+                     "FROM fill WHERE t_start <= ? ORDER BY t_start LIMIT ?", (as_of, as_of, limit)),
+            "run": ("SELECT number, fill, t_start, CASE WHEN end_known_at <= ? THEN t_end END AS t_end, "
+                    "CASE WHEN end_known_at <= ? THEN n_ls END AS n_ls, CASE WHEN end_known_at <= ? THEN stop_reason END "
+                    "AS stop_reason, end_known_at FROM run WHERE t_start <= ? ORDER BY t_start LIMIT ?",
+                    (as_of, as_of, as_of, as_of, limit)),
+            "beam_mode": ("SELECT * FROM beam_mode WHERE t_start <= ? ORDER BY t_start LIMIT ?", (as_of, limit)),
+            "certification": ("SELECT * FROM certification WHERE completed_at <= ? ORDER BY run LIMIT ?", (as_of, limit)),
             "meta": ("SELECT * FROM meta WHERE key <> 'config' ORDER BY key LIMIT ?", (limit + 4,)),
         }
         if table not in queries:
@@ -648,7 +796,10 @@ class RecordStore:
                         | {r[inc["columns"].index("element_id")] for r in inc["rows"]}) or [-1]
         elements = self._raw(
             f"SELECT * FROM element WHERE id IN ({', '.join('?' for _ in el_ids)}) ORDER BY id", el_ids)
-        return {"incident": inc, "incident_entry": attached, "entry": entries, "link": links, "element": elements}
+        part_rows = self._raw("SELECT * FROM part_ref WHERE incident_id = ? AND known_at <= ? ORDER BY known_at, id",
+                              (incident_id, as_of))
+        return {"incident": inc, "part_ref": part_rows, "incident_entry": attached, "entry": entries, "link": links,
+                "element": elements}
 
     # ------------------------------------------------------------ inspection
     def meta(self) -> dict[str, str]:
@@ -658,6 +809,9 @@ class RecordStore:
         """The latest known-at time anywhere in the Record ('as of the end')."""
         row = self._db.execute(
             "SELECT MAX(m) FROM (SELECT MAX(known_at) AS m FROM entry "
+            "UNION ALL SELECT MAX(known_at) FROM part_ref "
+            "UNION ALL SELECT MAX(completed_at) FROM certification "
+            "UNION ALL SELECT MAX(end_known_at) FROM run "
             "UNION ALL SELECT MAX(known_at) FROM link "
             "UNION ALL SELECT MAX(known_at) FROM incident_entry "
             "UNION ALL SELECT MAX(closed_known_at) FROM incident "
@@ -668,13 +822,17 @@ class RecordStore:
         return row[0] or 0
 
     def time_span(self) -> tuple[int, int]:
-        row = self._db.execute("SELECT MIN(t_start), MAX(COALESCE(t_end, t_start)) FROM entry").fetchone()
+        """From the first to the last event time, over entries and the calendar."""
+        row = self._db.execute(
+            "SELECT MIN(a), MAX(b) FROM (SELECT MIN(t_start) AS a, MAX(COALESCE(t_end, t_start)) AS b FROM entry "
+            "UNION ALL SELECT MIN(t_start), MAX(COALESCE(t_end, t_start)) FROM run "
+            "UNION ALL SELECT MIN(t_start), MAX(t_start) FROM beam_mode)").fetchone()
         return (row[0] or 0, row[1] or 0)
 
     def counts(self) -> dict[str, Any]:
         tables = {t: self._db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-                  for t in ("element", "element_relation", "entry", "link", "incident",
-                            "incident_entry", "query_log")}
+                  for t in ("element", "element_relation", "entry", "part_ref", "link", "incident",
+                            "incident_entry", "fill", "run", "beam_mode", "certification", "query_log")}
         by_type = [tuple(r) for r in self._db.execute(
             "SELECT record_class, source, type, kind, COUNT(*) FROM entry "
             "GROUP BY record_class, source, type, kind ORDER BY record_class, source, type")]
@@ -686,7 +844,8 @@ class RecordStore:
         import hashlib
 
         h = hashlib.sha256()
-        for table in ("meta", "element", "element_relation", "entry", "link", "incident", "incident_entry"):
+        for table in ("meta", "element", "element_relation", "entry", "link", "incident", "incident_entry",
+                      "part_ref", "fill", "run", "beam_mode", "certification"):
             for row in sorted(repr(r) for r in self._db.execute(f"SELECT * FROM {table}")):
                 h.update(row.encode())
         return h.hexdigest()

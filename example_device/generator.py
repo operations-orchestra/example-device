@@ -23,7 +23,7 @@ from typing import Any, Optional
 from aggregator import RecordStore
 from utils import DAY, HOUR, MINUTE, Entry, to_iso
 
-from . import readings, texts
+from . import quality, readings, texts
 from .config import HARD_CAP_MB, LUMISECTION_S, DeviceConfig
 from .model import DETECTOR, EXPERIMENT, DeviceModel, build_model, write_model
 from .plan import (BOX_SYNC_LOSS, CONFIGURE_FAILURE, FED_COMM_LOSS, HOT_CHANNELS, LV_DRIFT_HOURS,
@@ -52,14 +52,15 @@ def estimate_rows(cfg: DeviceConfig) -> int:
     """Entries in the Record. Readings add only their status changes, a few per box per day."""
     status = cfg.n_boxes * len(QUANTITIES) * (2 + cfg.days)
     runs = cfg.days * 7
-    per_run = cfg.n_boxes + len(cfg.subdetectors) + 3
-    return status + runs * per_run + cfg.days * 10 + 400
+    per_run = 2 + len(cfg.subdetectors) // 2           # a shift note, a calendar row, some certification rows
+    return status * 2 + runs * per_run + cfg.days * 10 + 400
 
 
 def estimate_bytes(cfg: DeviceConfig) -> int:
     """Record plus archive."""
     samples = cfg.n_boxes * len(QUANTITIES) * cfg.days * DAY // cfg.raw_cadence_s
-    return estimate_rows(cfg) * _BYTES_PER_ROW + samples * _BYTES_PER_SAMPLE
+    dqm = cfg.n_boxes * cfg.days * 7 * 110          # one CSV row per run and box in the data-quality archive
+    return estimate_rows(cfg) * _BYTES_PER_ROW + samples * _BYTES_PER_SAMPLE + dqm
 
 
 def fit_to_budget(cfg: DeviceConfig) -> tuple[DeviceConfig, list[str]]:
@@ -97,6 +98,7 @@ class _Gen:
         self.planted: list[dict[str, Any]] = []
         self.attached: set[tuple[int, int]] = set()
         self.touched: list[int] = []                     # entries the current fault script wrote or used
+        self.cert_known: dict[tuple[str, int], int] = {}  # (subdetector, run) -> when certification was completed
         self.dead_box = model.boxes[-1]                  # one known dead channel, as a distractor
         self.dead_channel = model.channels[self.dead_box][6 % cfg.channels_per_box]
 
@@ -154,30 +156,34 @@ class _Gen:
                 factor *= f.extra["factor"]
         return factor
 
-    def bad_ranges(self, run: Run, sub: str) -> list[tuple[int, int, str]]:
-        """Lumisection ranges of this run that certification marks bad for this subdetector."""
+    def bad_ranges(self, run: Run, sub: str) -> list[tuple[int, int, str, str]]:
+        """Lumisection ranges of this run that certification marks bad for this subdetector,
+        with the cause typed by the certifier and the part responsible."""
         out = []
         for f in self.faults(LV_DRIFT_TRIP):
             subs = {self.model.sub_of[b] for b in self.model.boxes_of_supply(f.element)}
             if sub in subs and run.start <= f.t <= run.end:
-                out.append((run.ls_at(f.t), run.n_ls, f"LV trip of {f.element}"))
+                out.append((run.ls_at(f.t), run.n_ls, f"LV trip of {f.element}", f.element))
         for f in self.faults(HOT_CHANNELS):
             fill_end = self.plan.fills[f.fill_idx].end
             if self.model.sub_of[f.element] == sub and run.start <= fill_end and run.end >= f.t:
-                out.append((run.ls_at(max(f.t, run.start)), run.n_ls, f"hot channels in {f.element}"))
+                out.append((run.ls_at(max(f.t, run.start)), run.n_ls, f"hot channels in {f.element}", f.element))
         return out
 
     # -- routine background ----------------------------------------------------------------
     def background(self) -> None:
         p, m = self.plan, self.model
 
-        # beam mode, as a state on the experiment
-        self.add("lhc", "MS", "state", "beam_mode", EXPERIMENT, p.start, payload={"value": "NO BEAM"})
-        modes = [(p.stop_start, "TECHNICAL STOP"), (p.stop_end, "NO BEAM")]
+        # the calendar: beam modes, fills and runs go to their own tables, not to entries
+        modes = [(p.start, "NO BEAM"), (p.stop_start, "TECHNICAL STOP"), (p.stop_end, "NO BEAM")]
         for f in p.fills:
             modes += [(f.start, "STABLE BEAMS"), (f.end, "NO BEAM")]
         for t, value in sorted(modes):
-            self.add("lhc", "MS", "state", "beam_mode", EXPERIMENT, t, payload={"value": value, })
+            self.store.add_beam_mode(t, value)
+        for f in p.fills:
+            self.store.add_fill(f.number, f.start, f.end)
+        for run in p.runs:
+            self.store.add_run(run.number, run.fill, run.start, run.end, run.n_ls, run.stop_reason)
 
         # low-voltage supply state, and each box's control link
         for supply in m.supplies:
@@ -212,22 +218,18 @@ class _Gen:
                 self.add("runcontrol", "MS", "point", "configure", DETECTOR,
                          failing[i].t_resume - 2 * MINUTE,
                          payload={"result": "ok", "fill": fill.number, "attempt": "after local configure"})
-            else:
-                self.add("runcontrol", "MS", "point", "configure", DETECTOR, fill.start - 15 * MINUTE,
-                         payload={"result": "ok", "fill": fill.number, "attempt": "initial"})
+            # a routine successful configure before a fill is not recorded as an entry
         for f in p.faults:
             if f.mode in (FED_COMM_LOSS, LV_DRIFT_TRIP):
                 self.add("runcontrol", "MS", "point", "configure", DETECTOR, f.t_resume - 2 * MINUTE,
                          payload={"result": "ok", "attempt": "reconfigure"})
 
-        # runs
+        # runs: only a stop caused by a fault is an entry; the rest is in the calendar
         for run in p.runs:
-            self.add("runcontrol", "MS", "point", "run_start", EXPERIMENT, run.start,
-                     payload={"run": run.number, "fill": run.fill})
-            self.idx[("run_stop", run.number)] = self.add(
-                "runcontrol", "MS", "point", "run_stop", EXPERIMENT, run.end,
-                payload={"run": run.number, "fill": run.fill, "n_ls": run.n_ls,
-                         "reason": run.stop_reason})
+            if run.stop_reason not in ("new run", "beam dump"):
+                self.idx[("run_stop", run.number)] = self.add(
+                    "runcontrol", "MS", "point", "run_stop", EXPERIMENT, run.end,
+                    payload={"run": run.number, "fill": run.fill, "n_ls": run.n_ls, "reason": run.stop_reason})
             self.elog(texts.SHIFT_LEADER, DETECTOR, run.start + 4 * MINUTE,
                       self.say("run_start", run=run.number, fill=run.fill))
 
@@ -254,7 +256,9 @@ class _Gen:
                     payload={"value": status, "reading": reading, "reference": reference, "unit": rule.unit},
                     raw_ref=f"source://control_archive/{box}/{quantity}?from={t_start}")))
 
-        # data-quality summary per run and box; certification per run and subdetector
+        # data quality: every run's numbers per box go to the data-quality archive (the source);
+        # the Record gets an entry only when a box's quality status changes
+        rows_by_box: dict[str, list[dict]] = {box: [] for box in m.boxes}
         for run in p.runs:
             dur = max(1, run.end - run.start)
             for box in m.boxes:
@@ -272,22 +276,52 @@ class _Gen:
                     if f.element == box and run.start <= p.fills[f.fill_idx].end and run.end >= f.t:
                         hot = f.extra["channels"]
                 occ = self.occupancy_factor(m.sub_of[box], run.start) * (1 + self.noise.gauss(0, 0.01))
-                self.idx[("qa", box, run.number)] = self.add(
-                    "dqm", "QA", "feature", "occupancy_summary", box, run.start,
-                    known=run.end + 10 * MINUTE, t_end=run.end, payload={
-                        "run": run.number, "n_channels": n_ch, "dead_fraction": round(dead, 4),
-                        "worst_ls_dead_fraction": round(worst, 4),
-                        "hot_fraction": round(len(hot) / n_ch, 4), "hot_channels": hot,
-                        "mean_occupancy": round(occ, 4)})
+                rows_by_box[box].append({
+                    "run": run.number, "t_start": run.start, "t_end": run.end, "known_at": run.end + 10 * MINUTE,
+                    "n_channels": n_ch, "dead_fraction": round(dead, 4), "worst_ls_dead_fraction": round(worst, 4),
+                    "hot_fraction": round(len(hot) / n_ch, 4), "hot_channels": hot, "mean_occupancy": round(occ, 4)})
+        quality.write_archive(self.archive_dir.parent / "dqm_archive", rows_by_box,
+                              {"system": "data-quality archive (synthetic)", "banner": BANNER})
+        # occupancy references per subdetector: 1 at the start; experts re-reference at the end of
+        # the first fill after a deliberate change
+        references: dict[str, list[tuple[int, float]]] = {sub: [(p.start, 1.0)] for sub in m.subdetectors}
+        for sub in m.subdetectors:
+            self.add("dqm", "QA", "state", "quality_reference", sub, p.start,
+                     payload={"value": 1.0, "reason": "initial reference"})
+        for f in self.faults(PLANNED_CHANGE):
+            t_ref = p.fills[f.fill_idx].end + 30 * MINUTE
+            value = round(self.occupancy_factor(f.element, f.t), 3)
+            references[f.element].append((t_ref, value))
+            self.add("dqm", "QA", "state", "quality_reference", f.element, t_ref,
+                     payload={"value": value, "reason": "re-referenced after the announced threshold change"})
+        for box in m.boxes:
+            sub, current = m.sub_of[box], None
+            for row in rows_by_box[box]:
+                ref = [v for t, v in references[sub] if t <= row["t_start"]][-1]
+                status = quality.status_of(row, ref)
+                if status != current:
+                    current = status
+                    self.idx[("quality", box, row["run"])] = self.add(
+                        "dqm", "QA", "state", "quality_status", box, row["t_start"], known=row["known_at"],
+                        payload={"value": status, "run": row["run"], "reference": ref,
+                                 **{k: row[k] for k in ("worst_ls_dead_fraction", "hot_fraction", "hot_channels", "mean_occupancy")}},
+                        raw_ref=f"source://dqm_archive/{box}?run={row['run']}")
+
+        # certification: completed per run and subdetector 1 to 3 days later; only bad ranges are entries
+        for run in p.runs:
             for sub in m.subdetectors:
                 bad = self.bad_ranges(run, sub)
                 known = run.end + int(self.noise.uniform(1, 3) * DAY)
-                self.idx[("cert", sub, run.number)] = self.add(
-                    "certification", "HI", "report", "cert_flag", sub, run.start, known=known,
-                    t_end=run.end, payload={
-                        "run": run.number, "status": "BAD" if bad else "GOOD",
-                        "bad_ls": [[a, b] for a, b, _ in bad],
-                        "cause": "; ".join(c for _, _, c in bad)})
+                self.store.add_certification(run.number, sub, known)
+                self.cert_known[(sub, run.number)] = known
+                if bad:
+                    self.idx[("cert", sub, run.number)] = self.add(
+                        "certification", "HI", "report", "cert_flag", sub, run.start, known=known,
+                        t_end=run.end, payload={"run": run.number, "status": "BAD",
+                                                "bad_ls": [[a, b] for a, b, _, _ in bad],
+                                                "cause": "; ".join(c for _, _, c, _ in bad)})
+                    for part in dict.fromkeys(x[3] for x in bad):
+                        self.ref(part, "cause", known, entry=self.idx[("cert", sub, run.number)])
 
         # shift notes and the daily run summary
         self.elog(texts.HCAL_DOC, self.dead_channel, p.start + 20 * MINUTE,
@@ -305,13 +339,16 @@ class _Gen:
                          f"{lost // MINUTE} min of HCAL downtime.")})
 
     # -- shared pieces of a fault script ---------------------------------------------------
-    def downtime(self, element: str, f: Fault, category: str, details: str) -> int:
+    def downtime(self, element: str, f: Fault, category: str, details: str, mentions: tuple = ()) -> int:
         dur = f.t_resume - f.t
-        did = self.add("downtime", "HI", "report", "downtime", element, f.t, known=f.t_resume + 2 * MINUTE,
+        known_dt = f.t_resume + 2 * MINUTE
+        did = self.add("downtime", "HI", "report", "downtime", element, f.t, known=known_dt,
                        t_end=f.t_resume, payload={
                            "duration_s": dur, "lost_lumi_pb": round(dur * LUMI_PB_PER_S, 2),
                            "group": "HCAL", "category": category, "details": details,
                            "run_stopped": f.mode != CONFIGURE_FAILURE})
+        for part in mentions:
+            self.ref(part, "mentioned", known_dt, entry=did)
         run = self.plan.run_at(f.t)
         if run and f.mode != CONFIGURE_FAILURE:
             self.store.add_link(did, self.idx[("run_stop", run.number)], "direct", "stopped_run",
@@ -320,9 +357,15 @@ class _Gen:
                                 rationale="downtime interval contains the run stop")
         return did
 
+    def ref(self, element: str, role: str, known: int, entry: Optional[int] = None,
+            incident: Optional[int] = None, status: str = "confirmed") -> None:
+        """Say that an entry or incident also concerns ``element``, in ``role``, from ``known`` on."""
+        self.store.add_part_ref(element, role, known, PRODUCER, VERSION, entry_id=entry, incident_id=incident,
+                                status=status)
+
     def open_incident(self, title: str, element: str, f: Fault, known: int,
                       attach: list[tuple[int, str]]) -> int:
-        iid = self.store.open_incident(title, element, f.t, known)
+        iid = self.store.open_incident(title, element, f.t, known, PRODUCER, VERSION)
         if f.t_resume:
             self.store.set_incident_end(iid, f.t_resume)
         for entry_id, role in attach:
@@ -337,14 +380,19 @@ class _Gen:
             self.store.attach(iid, entry_id, role, known)
 
     def conclude(self, iid: int, element: str, f: Fault, known: int, text: Optional[str],
-                 evidence: list[tuple[int, str]], no_cause_text: str = "") -> None:
-        """The expert's later analysis: a cause with its evidence, or 'unresolved'."""
+                 evidence: list[tuple[int, str]], no_cause_text: str = "",
+                 cause_parts: Optional[list[str]] = None) -> Optional[int]:
+        """The expert's later analysis: a cause with its evidence, or 'unresolved'.
+
+        ``cause_parts`` are the parts the cause names; they become "cause" parts of both the
+        cause entry and the incident, known when the cause is.
+        """
         if text is None:
             note = self.add("expert", "HI", "report", "closing_note", element, f.t, known=known,
                             payload={"author_role": texts.HCAL_EXPERT, "text": no_cause_text})
             self.attach(iid, note, "closing_note", known)
             self.store.close_incident(iid, "unresolved", known)
-            return
+            return None
         cause = self.add("expert", "HI", "report", "root_cause", element, f.t, known=known,
                          payload={"author_role": texts.HCAL_EXPERT, "text": text})
         self.attach(iid, cause, "cause", known)
@@ -355,15 +403,24 @@ class _Gen:
                                 rationale=rationale)
         self.store.label_incident(iid, "confirmed_cause", text, known)
         self.store.close_incident(iid, "closed", known)
+        for part in cause_parts or [element]:
+            if part != element:
+                self.ref(part, "cause", known, entry=cause)
+            self.ref(part, "cause", known, incident=iid)
+        return cause
 
     def certify(self, iid: int, f: Fault, sub: str) -> None:
         run = self.plan.run_at(f.t) or next((r for r in self.plan.runs if r.start >= f.t), None)
         if run is None:
             return
-        entry = self.store.get_entry(self.idx[("cert", sub, run.number)], as_of=2**62)
-        value = entry.payload["status"] + (f": {entry.payload['cause']}" if entry.payload["cause"] else "")
+        known = self.cert_known[(sub, run.number)]
+        eid = self.idx.get(("cert", sub, run.number))
+        if eid is None:                                   # certified good: no entry, only the completion time
+            self.store.label_incident(iid, "certification", "GOOD", known)
+            return
+        entry = self.store.get_entry(eid, as_of=2**62)
         self.attach(iid, entry.id, "certification", entry.known_at)
-        self.store.label_incident(iid, "certification", value, entry.known_at)
+        self.store.label_incident(iid, "certification", f"BAD: {entry.payload['cause']}", entry.known_at)
 
     def plant(self, f: Fault, reported: str, ask_at: int, iid: Optional[int]) -> None:
         self.planted.append({
@@ -378,12 +435,17 @@ class _Gen:
         fed = f.element
         sub = self.model.sub_of[self.model.boxes_of_fed(fed)[0]]
         point = self.add("daq", "MS", "point", "fed_out_of_sync", fed, f.t, payload={"state": "OUT_OF_SYNC"})
+        boxes = self.model.boxes_of_fed(fed)
+        for box in boxes:
+            self.ref(box, "affected", f.t, entry=point)
         e1 = self.elog(texts.DAQ_SHIFTER, fed, f.t + 2 * MINUTE, self.say("fed_symptom", fed=fed, sub=sub))
         e2 = self.elog(texts.HCAL_DOC, fed, f.t_resume + MINUTE, self.say("fed_recovery", fed=fed))
-        down = self.downtime(sub, f, "FED", self.say("fed_downtime", fed=fed))
+        down = self.downtime(sub, f, "FED", self.say("fed_downtime", fed=fed), mentions=(fed,))
         opened = f.t_resume + 10 * MINUTE
         iid = self.open_incident(f"Communication loss on {fed}", fed, f, opened,
                                  [(point, "symptom"), (e1, "symptom"), (e2, "action"), (down, "downtime")])
+        for box in boxes:
+            self.ref(box, "affected", opened, incident=iid)
         self.store.label_incident(iid, "recovery_action", "Stop the run and reconfigure HCAL", opened)
         self.certify(iid, f, sub)
         if t_cause is None:
@@ -410,6 +472,8 @@ class _Gen:
         follow = self.add("expert", "HI", "report", "followup", box, f.t, known=told, payload={
             "author_role": texts.HCAL_DOC, "text": self.say("cfg_followup", fill=fill.number, box=box)})
         self.attach(iid, follow, "action", told)
+        self.ref(DETECTOR, "mentioned", told, entry=follow)
+        self.ref(box, "suspected", told, incident=iid, status="proposed")
         self.store.label_incident(
             iid, "recovery_action",
             f"Power-cycle the control module of {box}, then run a local configure", told)
@@ -419,7 +483,7 @@ class _Gen:
         self.conclude(iid, box, f, max(t_cause, told), self.say("cfg_cause", box=box, supply=supply), [
             (lost, "the control link was lost from the moment the low voltage came back"),
             (lv_on, "the low-voltage power cycle preceded the loss of the control link"),
-        ])
+        ], cause_parts=[box, supply])
         self.plant(f, DETECTOR, f.t + 5 * MINUTE, iid)
 
     def lv_drift_trip(self, f: Fault) -> None:
@@ -429,11 +493,15 @@ class _Gen:
         names = ", ".join(boxes)
         trip = self.idx[("supply_state", supply, f.t)]
         e1 = self.elog(texts.DCS_SHIFTER, supply, f.t + 3 * MINUTE, self.say("lv_symptom", supply=supply, boxes=names))
+        for box in boxes:
+            self.ref(box, "mentioned", f.t + 3 * MINUTE, entry=e1)
         e2 = self.elog(texts.HCAL_DOC, supply, f.t_resume + MINUTE, self.say("lv_recovery", supply=supply, boxes=names))
-        down = self.downtime(sub, f, "LV", self.say("lv_downtime", supply=supply))
+        down = self.downtime(sub, f, "LV", self.say("lv_downtime", supply=supply), mentions=(supply,))
         opened = f.t_resume + 10 * MINUTE
         iid = self.open_incident(f"Trip of {supply}", supply, f, opened,
                                  [(trip, "symptom"), (e1, "symptom"), (e2, "action"), (down, "downtime")])
+        for box in boxes:
+            self.ref(box, "affected", opened, incident=iid)
         self.store.label_incident(iid, "recovery_action", f"Power-cycle {supply}", opened)
         self.certify(iid, f, sub)
         drift = [(eid, f"the output voltage was {status} before the trip; the series is in the control-system archive")
@@ -454,9 +522,12 @@ class _Gen:
                           payload={"flag": "hot", "run": run.number}) for ch in channels]
         note_t = max(f.t + 40 * MINUTE, seen)
         e1 = self.elog(texts.DQM_SHIFTER, sub, note_t, self.say("hot_symptom", sub=sub, box=box))
+        self.ref(box, "mentioned", note_t, entry=e1)
         opened = note_t + 5 * MINUTE
         iid = self.open_incident(f"Hot channels in {box}", box, f, opened,
                                  [(e1, "symptom")] + [(x, "symptom") for x in flags])
+        for ch in channels:
+            self.ref(ch, "affected", opened, incident=iid)
         self.store.set_incident_end(iid, fill_end)
         told = self.next_expert_slot(note_t)
         follow = self.add("expert", "HI", "report", "followup", box, f.t, known=told, payload={
@@ -464,13 +535,13 @@ class _Gen:
         self.attach(iid, follow, "action", told)
         self.store.label_incident(iid, "recovery_action", f"Mask the hot channels of {box}", told)
         self.certify(iid, f, sub)
-        qa = [(self.idx[("qa", box, r.number)], "the occupancy summary shows the hot fraction")
-              for r in self.plan.runs_overlapping(f.t, fill_end)]
+        qa = [(self.idx[("quality", box, r.number)], "the box's quality status changed to hot channels")
+              for r in self.plan.runs_overlapping(f.t, fill_end) if ("quality", box, r.number) in self.idx][:1]
         if self.words.random() < 0.3:
             self.conclude(iid, box, f, f.t + 5 * DAY, None, [],
                           self.say("hot_no_cause", channels=short, box=box))
         else:
-            self.conclude(iid, box, f, f.t + 5 * DAY, self.say("hot_cause", channels=short), qa)
+            self.conclude(iid, box, f, f.t + 5 * DAY, self.say("hot_cause", channels=short), qa, cause_parts=channels)
         self.plant(f, box, note_t + 2 * MINUTE, iid)
 
     def planned_change(self, f: Fault) -> None:
@@ -488,7 +559,7 @@ class _Gen:
                          payload={"errors": self.words.randrange(2000, 9000)})
         e1 = self.elog(texts.DAQ_SHIFTER, box, f.t + 2 * MINUTE, self.say("sync_symptom", box=box))
         e2 = self.elog(texts.HCAL_DOC, box, f.t_resume + MINUTE, self.say("sync_recovery", box=box))
-        down = self.downtime(sub, f, "FRONTEND", self.say("sync_downtime", box=box))
+        down = self.downtime(sub, f, "FRONTEND", self.say("sync_downtime", box=box), mentions=(box,))
         opened = f.t_resume + 10 * MINUTE
         iid = self.open_incident(f"Data integrity errors from {box}", box, f, opened,
                                  [(point, "symptom"), (e1, "symptom"), (e2, "action"), (down, "downtime")])
@@ -542,10 +613,10 @@ class _Gen:
 
 # --------------------------------------------------------------------------------- entry point
 def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dict[str, Any]:
-    """Write ``record.db``, ``planted.json`` and the control-system archive into ``out_dir``.
+    """Write ``record.db``, ``planted.json`` and the simulated source archives into ``out_dir``.
 
-    The archive (``source/control_archive/``) stands in for an existing system; it is not
-    part of the Record. Returns a short summary.
+    The archives (``source/control_archive/`` and ``source/dqm_archive/``) stand in for
+    existing systems; they are not part of the Record. Returns a short summary.
     """
     cfg, notes = fit_to_budget(cfg)
     out = Path(out_dir)
@@ -555,8 +626,8 @@ def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dic
         if not force:
             raise FileExistsError(f"{db_path} exists; pass force=True (--force) to rebuild it")
         db_path.unlink()
-    if archive_dir.exists():
-        shutil.rmtree(archive_dir)
+    if (out / "source").exists():
+        shutil.rmtree(out / "source")
 
     model = build_model(cfg)
     plan = build_plan(cfg, model)
@@ -576,10 +647,10 @@ def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dic
     store.close()
 
     size_mb = db_path.stat().st_size / 1e6
-    archive_mb = sum(f.stat().st_size for f in archive_dir.iterdir()) / 1e6
+    archive_mb = sum(f.stat().st_size for f in (out / "source").rglob("*") if f.is_file()) / 1e6
     if size_mb + archive_mb > cfg.max_size_mb:
         db_path.unlink()
-        shutil.rmtree(archive_dir)
+        shutil.rmtree(out / "source")
         raise SizeBudgetError(f"Record ({size_mb:.1f} MB) plus archive ({archive_mb:.1f} MB) came out "
                               f"over the {cfg.max_size_mb} MB budget")
 

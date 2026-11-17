@@ -75,7 +75,7 @@ def test_entries_are_well_formed(store, end):
     for e in store.entries(end):
         assert e.element in known_elements
         assert e.known_at >= e.t_start
-        assert e.producer and e.raw_ref.startswith(("synthetic://", "source://control_archive/"))
+        assert e.producer and e.raw_ref.startswith(("synthetic://", "source://control_archive/", "source://dqm_archive/"))
 
 
 def test_every_planted_fault_is_in_the_record(tiny, store, end):
@@ -131,8 +131,8 @@ def test_the_record_holds_no_time_series(tiny, store, end):
     types = {t for _, _, t, _, _ in store.counts_by_type(end)}
     assert not types & {"lv_voltage", "temperature"}
     status = sum(n for _, _, t, _, n in store.counts_by_type(end) if t.endswith("_status"))
-    assert status < 0.2 * store.count_entries(end)
     archive = ControlArchive.find(tiny["db"])
+    assert status < 0.01 * sum(c["n"] for c in archive.channels())   # far fewer entries than samples
     assert {(c["element"], c["quantity"]) for c in archive.channels()} == {
         (b, q) for b in store.elements("readout_box") for q in ("lv_voltage", "temperature")}
     for e in store.entries(end, types=["lv_voltage_status"]):   # every status points into the archive

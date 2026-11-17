@@ -79,8 +79,11 @@ def _plot(args: argparse.Namespace) -> int:
     out = args.out or Path(args.db).parent / f"plot_{args.element}.png"
     from adapters.control_archive import ControlArchive
 
-    archive = ControlArchive.find(args.db)
+    from adapters.dqm_archive import DqmArchive
+
+    archive, dqm = ControlArchive.find(args.db), DqmArchive.find(args.db)
     path = plot_element(store, args.element, out, series=archive.fetch if archive else None,
+                        quality=dqm.fetch if dqm else None,
                         t0=from_iso(args.t_from) if args.t_from else None,
                         t1=from_iso(args.t_to) if args.t_to else None, as_of=_as_of(args))
     print(f"Wrote {path}")

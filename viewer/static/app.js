@@ -32,6 +32,8 @@ async function api(route, params = {}, withAsOf = true) {
 function describe(e) {
   const p = e.payload || {};
   if (p.text) return `${p.author_role || '?'}: ${p.text}`;
+  if (e.type === 'quality_status') return `quality ${p.value} (run ${p.run}: occupancy ${p.mean_occupancy} vs reference ${p.reference}, hot ${p.hot_fraction}, worst-lumisection dead ${p.worst_ls_dead_fraction})`;
+  if (e.type === 'quality_reference') return `occupancy reference ${p.value}: ${p.reason}`;
   if (e.type.endsWith('_status')) return `${e.type.replace('_status', '').replace('_', ' ')} ${p.value} (reading ${p.reading} ${p.unit}, setpoint ${p.reference})`;
   if (e.type === 'downtime') return `${Math.floor(p.duration_s / 60)} min, ${p.lost_lumi_pb} /pb lost, ${p.category}: ${p.details}`;
   return Object.entries(p).map(([k, v]) => `${k}=${Array.isArray(v) ? JSON.stringify(v) : v}`).join(', ');
@@ -43,6 +45,13 @@ const elLink = (name) => `<a href="#/timeline/${encodeURIComponent(name)}">${esc
 const incLink = (id, title) => `<a href="#/incident/${id}">#${id}${title ? ' ' + esc(title) : ''}</a>`;
 const CLASS_NAME = { MS: 'Machine state', QA: 'Quality assurance', HI: 'Human interpretation' };
 const clsTag = (c) => `<span class="cls cls-${c}" title="${CLASS_NAME[c] || c}">${c}</span>`;
+const ROLE_ORDER = ['filed', 'reported', 'mentioned', 'affected', 'suspected', 'cause'];
+function partsTable(parts) {
+  if (!parts || !parts.length) return `<p class="muted">None ${S.replay ? 'known yet' : 'recorded'}.</p>`;
+  const sorted = [...parts].sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.known_at - b.known_at);
+  return `<div class="tablewrap"><table><tr><th>Role</th><th>Part</th><th>Known to the Record</th><th>Said by</th><th>Status</th></tr>${sorted.map((r) =>
+    `<tr><td><span class="role role-${r.role}">${r.role}</span></td><td>${elLink(r.element)}</td><td class="t">${fmt(r.known_at)}</td><td class="mono small">${esc(r.producer)}</td><td>${r.status}</td></tr>`).join('')}</table></div>`;
+}
 const statusCell = (s) => `<span class="status">${s}</span>`;
 const ENTRY_HEAD = '<th>Happened</th><th>Known to the Record</th><th class="num">id</th><th>Class</th><th>Source / type</th><th>Element</th><th>What</th>';
 function entryRows(entries, extra) {
@@ -277,7 +286,7 @@ const hideTip = () => { $('#tip').hidden = true; };
 /* --------------------------------------------------------- detector map */
 const NORMAL = new Set(['on', 'ok', 'normal', 'STABLE BEAMS', 'NO BEAM', 'TECHNICAL STOP']);
 const stateName = (k) => k.replace('_status', '').replace(/_/g, ' ');
-const SHORT = { control_link: 'link', lv_voltage_status: 'LV', temperature_status: 'temp', supply_state: 'supply', beam_mode: 'beam' };
+const SHORT = { control_link: 'link', lv_voltage_status: 'LV', temperature_status: 'temp', quality_status: 'quality', quality_reference: 'reference', supply_state: 'supply', beam_mode: 'beam' };
 const shortName = (k) => SHORT[k] || stateName(k);
 function mapSvg(d, width) {
   const W = Math.max(760, width), SW = 170, FW = 170, SX = 16, FX = W - FW - 16, BX = SX + SW + 70, BW = FX - 70 - BX, RH = 50, GAP = 10;
@@ -286,7 +295,9 @@ function mapSvg(d, width) {
   const rel = (e, r) => e.related.filter(([x]) => x === r).map(([, n]) => n);
   const hot = Object.fromEntries(d.flags.map((f) => [f.element, f]));
   const issues = {};
-  for (const i of d.open_issues) (issues[i.element] = issues[i.element] || []).push(i);
+  for (const i of d.open_issues) {
+    for (const el of new Set([i.element, ...(i.parts || []).map((x) => x.element)])) (issues[el] = issues[el] || []).push(i);
+  }
   let y = 8, body = '', wires = '';
   const node = (e, x, yy, w, h, extra) => {
     const st = Object.entries(e.states);
@@ -356,7 +367,8 @@ function mapHeader(d) {
 }
 
 /* --------------------------------------------------------------- tables */
-const ER_POS = { element: [20, 20], element_relation: [20, 150], entry: [290, 20], link: [570, 20], incident_entry: [570, 250], incident: [290, 320], query_log: [830, 20], meta: [830, 180] };
+const ER_POS = { element: [20, 20], element_relation: [20, 150], part_ref: [20, 290], entry: [290, 20], incident: [290, 330],
+  link: [570, 20], incident_entry: [570, 250], certification: [570, 380], run: [850, 20], fill: [850, 180], beam_mode: [850, 300], query_log: [850, 400], meta: [850, 540] };
 function erDiagram(tables) {
   const BW = 210, HH = 26, RH = 16;
   const idx = Object.fromEntries(tables.map((t) => [t.name, t]));
@@ -381,7 +393,8 @@ function erDiagram(tables) {
       edges += `<path class="wire" d="${d}"/><circle class="wire-end" cx="${ex}" cy="${y2}" r="3.5"/>`;
     });
   }
-  return `<svg viewBox="0 0 1060 590" width="1060" height="590" role="img" aria-label="the tables of the Record and how they point to each other">${boxes}${edges}</svg>`;
+  const H = Math.max(...tables.map((t) => ER_POS[t.name][1] + HH + RH * t.columns.length + 16));
+  return `<svg viewBox="0 0 1080 ${H}" width="1080" height="${H}" role="img" aria-label="the tables of the Record and how they point to each other">${boxes}${edges}</svg>`;
 }
 const TIME_COL = /(_at|^t_start|^t_end|^as_of)$/;
 function rawTable(t, highlight) {
@@ -527,8 +540,12 @@ PAGES.built = async () => {
   <div class="tablewrap"><table>${head}
     ${row('<b>A voltage reading</b>', `Invents the full series, a sample every ${every}, and writes it to the simulated archive${code('voltage')}. Applies a fixed rule to it and writes an entry each time the status changes${code('status_rule', 'rule')}.`, entryCell(ex.voltage),
       'The series is already in the control-system archive. The <b>sparsifier</b> applies a status rule owned by the subsystem and writes the changes, each with a pointer into the archive.')}
-    ${row('<b>Data quality of a run</b>', `Sets five numbers per run and box directly from the planted faults, plus 1% noise. No histogram or plot exists.${code('quality')}`, entryCell(ex.quality),
-      'The <b>sparsifier</b> extracts numbers from data-quality histograms; the <b>summarizer</b> could describe a plot in words.')}
+    ${row('<b>Data quality of a run</b>', `Sets five numbers per run and box from the planted faults, plus 1% noise, and writes them to a simulated data-quality archive. Writes an entry each time a box's quality status changes, against a reference per subdetector${code('quality')}.`, entryCell(ex.quality),
+      'The <b>sparsifier</b> extracts numbers from data-quality histograms in the source and records quality status changes, with a pointer.')}
+    ${row('<b>Runs, fills, beam modes</b>', `Writes them to calendar tables, not as entries. Only a run stopped by a fault, and a configure attempt that was not routine, become entries${code('calendar_write')}.`, d.calendar ? `${d.calendar.runs} runs, ${d.calendar.fills} fills in the calendar` : '',
+      'A run-control <b>adapter</b> fills the calendar from run control and the LHC.')}
+    ${row('<b>Certification</b>', `Records when each run was certified per subdetector. Writes an entry only for a bad lumisection range; good is inferred${code('certification')}.`, d.calendar ? `${d.calendar.certified} run-and-subdetector certifications` : '',
+      'The certification <b>adapter</b> reads the certification database.')}
     ${row('<b>A logbook note</b>', `Picks one of two or three hand-written sentences per situation and fills in names of parts. There are never people's names.${code('note', 'templates')}`, entryCell(ex.note),
       'The <b>anonymizer</b> replaces names with roles; the <b>summarizer</b> shortens long threads. Both use local language models.')}
   </table></div>
@@ -538,6 +555,9 @@ PAGES.built = async () => {
       'The <b>aggregator</b> builds them from shared identifiers and timestamps.')}
     ${row('<b>An indirect link</b><br><span class="small muted">an expert\'s reasoning</span>', `The fault script writes it as already confirmed, with one fixed sentence as the reason, at the moment the cause is recorded.${code('indirect_link')}`, linkCell(d.links.indirect),
       'Software <b>proposes</b> which observation supports which conclusion; an <b>expert</b> confirms, corrects or rejects each one.')}
+    ${row('<b>Parts a record concerns</b><br><span class="small muted">beyond the one it was filed under</span>', `Names the other parts each entry and incident concerns, with a role and a time: the boxes a FED reads out, the supply behind a box, the box suspected and then confirmed as the cause${code('parts')}.`,
+      d.part_example ? `${incLink(d.part_example.incident.id, d.part_example.incident.title)}<br><span class="small">${d.part_example.parts.map((r) => `${r.role}: ${esc(r.element)}, ${fmt(r.known_at)}`).join('<br>')}</span>` : 'none',
+      'The <b>summarizer</b> proposes which parts a note is about; <b>experts</b> confirm suspected and cause parts.')}
     ${row('<b>An incident</b><br><span class="small muted">entries grouped into one problem</span>', `Every planted fault gets a complete incident from its script: symptoms, action, recovery, usually a cause.${code('incident', 'one fault script')}`,
       inc ? `${incLink(inc.incident.id, inc.incident.title)}<br><span class="small">${inc.n_entries} entries, ${inc.n_links} expert links<br>recovery: ${esc(inc.incident.recovery_action || 'none')}<br>cause: ${esc(inc.incident.confirmed_cause || 'none')}</span>` : 'none in this Record',
       'For selected incidents, the team and the <b>experts</b> who handled them reconstruct the history. The rest are grouped automatically and unreviewed.')}
@@ -548,12 +568,13 @@ PAGES.built = async () => {
   <p>Each row is a real design decision that is <b>not settled</b>. The demo fixes it silently; this table is here so nobody mistakes it for decided. Details are in docs/DESIGN.md, section 7a.</p>
   <div class="tablewrap"><table><tr><th>Choice</th><th>In the demo</th><th>What it hides</th></tr>
     <tr><td><b>Which reading changes are recorded</b></td><td>A fixed rule: compared with the setpoint, low or high beyond a band, drifting beyond a slope, must hold 10 minutes</td><td>The thresholds are hand-picked. A change the rule misses is only in the archive, not in the Record; a change is recorded 10 minutes late</td></tr>
-    <tr><td><b>Summarizing data quality</b></td><td>Five numbers per run and box</td><td>Short problems are diluted; position is lost</td></tr>
+    <tr><td><b>Which quality changes are recorded</b></td><td>Five numbers per run and box, compared once per run with a reference per subdetector</td><td>Short problems are diluted in a run; position within a box is lost; the reference is updated by hand</td></tr>
+    <tr><td><b>Certification</b></td><td>Only bad ranges stored; good inferred once certification is complete</td><td>Re-certification that withdraws a bad range would need a correction entry; not exercised here</td></tr>
     <tr><td><b>Plots</b></td><td>None</td><td>Intended: keep an incident's relevant plots, mostly logbook attachments</td></tr>
     <tr><td><b>When quality data arrive</b></td><td>Ten minutes after the run</td><td>Online plots are visible during a run</td></tr>
     <tr><td><b>The source archive</b></td><td>Evenly spaced samples, kept for ever, read instantly</td><td>Real archives store on change, may expire, and can be slow or unreachable</td></tr>
     <tr><td><b>Logbook text</b></td><td>One templated sentence</td><td>Real notes are long and irregular; matching is harder</td></tr>
-    <tr><td><b>Which part a record is about</b></td><td>Exactly one part, known to the generator</td><td>Must be read from free text; a cause often involves several parts</td></tr>
+    <tr><td><b>Which parts a record concerns</b></td><td>Named by the generator, which knows where it planted each fault</td><td>Must be read from free text and confirmed by experts; roles are a first guess at a vocabulary</td></tr>
     <tr><td><b>How late knowledge arrives</b></td><td>Fixed delays</td><td>Real delays vary; many causes are never written</td></tr>
     <tr><td><b>Complete incidents</b></td><td>Every fault has one</td><td>Only expert-reviewed incidents are this complete</td></tr>
     <tr><td><b>Language models</b></td><td>None used</td><td>The anonymizer and summarizer would use local ones</td></tr>
@@ -587,7 +608,7 @@ PAGES.interfaces = async () => {
   const card = (i) => {
     const impls = i.items.filter((x) => x.kind === 'implementation' && i.status !== 'built');
     const main = i.items.filter((x) => !(x.kind === 'implementation' && i.status !== 'built'));
-    return `<div class="card iface" id="if-${i.file.replace(/\W/g, '-')}"><h3 style="margin-top:0">${esc(i.title)} <span class="status${i.status === 'built' ? ' built' : ''}">${i.status === 'built' ? 'built' : 'interface only'}</span>
+    return `<div class="card iface" id="if-${i.file.replace(/\W/g, '-')}"><h3 style="margin-top:0">${esc(i.title)} <span class="ifstatus${i.status === 'built' ? ' built' : ''}">${i.status === 'built' ? 'built' : 'interface only'}</span>
       <a class="code" href="/source/${i.file}#L1" target="_blank" rel="noopener">${esc(i.file)}</a></h3>
       <p>${esc(i.role)}</p>
       ${i.example && i.example.input ? `<div class="io"><div><b>Takes</b><pre>${esc(i.example.input)}</pre></div><div><b>Gives</b><pre>${esc(i.example.output)}</pre></div></div>` : ''}
@@ -602,7 +623,7 @@ PAGES.interfaces = async () => {
   <div class="note">Where a part would produce entries, the card shows one real entry of that kind from this Record. Today the generator writes those entries itself; the interface says what a real part must produce instead.</div>
   ${groups.map(([g, title]) => `<h2>${title}</h2>${d.interfaces.filter((i) => i.group === g).map(card).join('')}`).join('')}
   <h2>The detector model</h2>
-  <div class="card iface"><h3 style="margin-top:0">Detector model <span class="status">planned</span></h3>
+  <div class="card iface"><h3 style="margin-top:0">Detector model <span class="ifstatus">planned</span></h3>
     <p>Not yet written as code. The plan is in <span class="mono">docs/DETECTOR_PLAN.md</span>: one interface (the map at a time, the views, the parts, the channels a part covers, translating between views) with the toy detector and cmscoord behind it.</p></div>`;
   return { html };
 };
@@ -616,10 +637,11 @@ PAGES.tables = async () => {
   <p class="lead">The Record is one database with eight tables. A line in the diagram means "this column holds the id of a row in that table". Click a table for its columns and real rows.</p>
   <div class="tablewrap">${erDiagram(d.tables)}</div>
   <div class="note">An <b>element</b> is a part of the detector. An <b>entry</b> is one recorded thing about one element, with two times: when it happened and when the Record learned of it. A <b>link</b> connects two entries. An <b>incident</b> is a problem; <b>incident_entry</b> lists which entries belong to it and in what role. <b>element_relation</b> says which supply powers a box and which FED reads it.</div>
-  <div class="note todo"><b>To do: one part per row is too strict.</b> Every entry, and every incident, names exactly one element. A real root cause often involves several parts, for example a readout box and the supply that powers it. The plan is a further table that lets an entry or incident name several elements, each with a role. Not built yet; it will change the detector map, the timelines and the "same element" precedent rule.</div>
+  <div class="note"><b>Several parts per record.</b> <span class="mono">part_ref</span> lists every part an entry or incident concerns, each with a role and its own time: an incident reported on HCAL can name a readout box as suspected six hours later, and the box and its supply as the cause six days later. Every entry has exactly one "filed" part, the one its source filed it under; <span class="mono">entry.element_id</span> keeps a copy of it. <b>fill</b>, <b>run</b> and <b>beam_mode</b> are the calendar; <b>certification</b> says when each run was certified.</div>
   <h2>One incident, followed through the tables</h2>
   ${w ? `<div class="filters"><label>Incident <select id="tb-inc">${d.incidents.map((i) => `<option value="${i.id}"${i.id === d.incident_id ? ' selected' : ''}>#${i.id} ${esc(i.title)}</option>`).join('')}</select></label> <a href="#/incident/${d.incident_id}">open its page</a></div>
   <h3>1. One row in <span class="mono">incident</span></h3>${rawTable(w.incident, ['id', 'element_id'])}
+  <h3>1b. Rows in <span class="mono">part_ref</span> with incident_id = ${d.incident_id}</h3><p class="muted small">The parts it concerns, each with a role and its own time.</p>${rawTable(w.part_ref, ['incident_id', 'element_id'])}
   <h3>2. Rows in <span class="mono">incident_entry</span> with incident_id = ${d.incident_id}</h3><p class="muted small">Each attaches one entry and says what part it plays. First ${w.incident_entry.rows.length} shown.</p>${rawTable(w.incident_entry, ['incident_id', 'entry_id'])}
   <h3>3. The rows in <span class="mono">entry</span> those point to</h3><p class="muted small">Compare t_start with known_at to see how late each was learned.</p>${rawTable(w.entry, ['id', 'element_id'])}
   <h3>4. The rows in <span class="mono">element</span> those are about</h3>${rawTable(w.element, ['id', 'parent_id'])}
@@ -711,6 +733,9 @@ PAGES.entry = async (parts) => {
     <dt>Corrects</dt><dd>${e.supersedes ? entryLink(e.supersedes) : 'nothing'}</dd>
     <dt>Corrected by</dt><dd>${d.superseded_by ? entryLink(d.superseded_by) : 'nothing'}</dd>
   </dl></div><div class="card"><b>Content (payload)</b><pre>${esc(JSON.stringify(e.payload, null, 2))}</pre></div></div>
+  <h2>Parts this entry concerns</h2>
+  <p class="muted small">"filed" is the part the source filed it under; the others were added with their own times.</p>
+  ${partsTable(d.parts)}
   <h2>Incidents this entry belongs to</h2>
   ${d.incidents.length ? '<ul>' + d.incidents.map((i) => `<li>${incLink(i.id, i.title)} as <b>${esc(i.role)}</b></li>`).join('') + '</ul>' : '<p class="muted">None.</p>'}
   <h2>Links</h2>
@@ -763,6 +788,9 @@ PAGES.incident = async (parts) => {
   </dl></div>
   <div class="filters">${S.replay && S.replay.id === i.id ? '<a href="#/replay">Back to the replay</a>' : `<button class="primary" data-replay="${i.id}">Replay this incident</button> <span class="muted small">step through how the Record learned about it</span>`}
     · <a href="#/timeline/${encodeURIComponent(i.element)}">Timeline of ${esc(i.element)}</a></div>
+  <h2>Parts this incident concerns</h2>
+  <p class="muted small">Where it was reported, what it affected, and where the fault is suspected or confirmed to be, each with when the Record learned it.</p>
+  ${partsTable(d.parts)}
   <h2>When each piece happened, and when the Record learned of it</h2>
   <p class="muted small">Each entry is drawn twice: when it happened (top) and when it became known (bottom). A vertical line was known at once; a long slanted line was written much later. The scale is compressed: each step to the right is about ten times longer.</p>
   <div class="key">${roles.map((r) => `<span><i class="${ROLE_CLASS[r]}"></i>${ROLE_LABEL[r] || r}</span>`).join('')}</div>
@@ -795,7 +823,9 @@ PAGES.timeline = async (parts) => {
   <details open><summary>How to read this</summary>
   <ul><li><b>Voltage and temperature are not stored in the Record.</b> They are fetched from the source archive for the range in view. Zoomed out, each drawn point averages many samples and the light band (shown for a single box) is their minimum to maximum; zoom in far enough and every sample is drawn. <a href="#/built">Why the Record does not keep them.</a></li>
   <li><b>Reading status</b> is what the Record keeps instead: one entry each time a box's reading changes status (drifting, low, high, off, back to normal). Each bar runs from one change to the next.</li>
-  <li>Dead channels, hot channels and occupancy are one entry per run, drawn as a flat segment across the run.</li>
+  <li><b>Dead channels, hot channels and occupancy</b> are per-run numbers, also fetched from a source (the data-quality archive), drawn as a flat segment across each run. The Record keeps only <b>quality status</b> changes.</li>
+  <li><b>Not certified yet</b>: runs whose certification is not complete for the subdetector. Once it is, a lumisection is good unless a <b>certified bad</b> range covers it; good is not stored.</li>
+  <li>The rows include entries filed on other parts that <b>concern</b> this one, for example a logbook note filed on a supply that names this box.</li>
   <li>The rows at the bottom are other entries: downtime, certified-bad ranges, state changes, fault events and logbook notes. Hover to read one, click to open it. Dashed lines are incidents.</li>
   <li>Drag across the chart to zoom into a time range; double-click to see everything. "Typical range" ignores the most extreme 5% at each end, so a small drift stays visible next to a trip to zero.</li></ul></details>`;
   return { html, mount() {
@@ -815,13 +845,13 @@ PAGES.timeline = async (parts) => {
   } };
 };
 /* Draws the readings-and-records chart into a host. Used by the Timeline page and by Replay. */
-const STATUS_CLS = { 'drifting down': 'warn', 'drifting up': 'warn', low: 'bad', high: 'bad', off: 'down' };
+const STATUS_CLS = { 'drifting down': 'warn', 'drifting up': 'warn', low: 'bad', high: 'bad', off: 'down', 'channels lost': 'down', 'hot channels': 'bad', 'occupancy high': 'warn', 'occupancy low': 'warn' };
 function mountTimeline(host, d, view, name) {
   const rowsOf = (dd) => dd.strip.map((r) => ({ label: r.row, items: r.items.map((it) => ({
-    t0: it.t0, ...(['Stable beams', 'Downtime', 'Certified bad', 'Reading status'].includes(r.row) ? { t1: it.t1 ?? null } : {}),
-    cls: { 'Stable beams': 'beam', Downtime: 'down', 'Certified bad': 'bad', 'Reading status': STATUS_CLS[it.value] || 'warn', 'State change': 'mk', 'Fault event': it.planned ? 'mk' : 'mk crit', 'Logbook note': it.routine ? 'note routine' : 'note' }[r.row],
+    t0: it.t0, ...(['Stable beams', 'Downtime', 'Not certified yet', 'Certified bad', 'Reading status', 'Quality status'].includes(r.row) ? { t1: it.t1 ?? null } : {}),
+    cls: { 'Stable beams': 'beam', Downtime: 'down', 'Not certified yet': 'pending', 'Certified bad': 'bad', 'Reading status': STATUS_CLS[it.value] || 'warn', 'Quality status': STATUS_CLS[it.value] || 'warn', 'State change': 'mk', 'Fault event': it.planned ? 'mk' : 'mk crit', 'Logbook note': it.routine ? 'note routine' : 'note' }[r.row],
     shape: { 'State change': 'diamond', 'Fault event': 'tri', 'Logbook note': 'tick' }[r.row],
-    tip: `${fmt(it.t0)}\n${it.text}`, go: `#/entry/${it.id}` })) }));
+    tip: `${fmt(it.t0)}\n${it.text}`, go: it.id ? `#/entry/${it.id}` : undefined })) }));
   let cur = d, token = 0;
   const draw = () => {
     const colour = (s, i) => ({ ...s, cls: cur.colour_by === 'subdetector' ? `c${cur.groups.indexOf(s.group) + 1} thin` : `c${i + 1}` });
@@ -908,12 +938,12 @@ PAGES.replay = async () => {
     <p class="lead">Every entry has two times: when it happened and when the Record learned of it. A replay winds the Record back to a moment and shows only what it knew then, so you can step through an incident the way a crew would have met it.</p>
     <div class="note">Everywhere else in this GUI you see the finished Record. During a replay, every page shows the Record at the replay's moment, and a bar at the top lets you step forward and leave.</div>
     <h2>Pick an incident to replay</h2>
-    <p class="muted small">"Seen before?" asks, at the moment a crew would first ask, whether an earlier incident was already on record. Two possible rules are shown: an earlier incident on the same element, or one with the same kind of symptom on any element.</p>
+    <p class="muted small">"Seen before?" asks, at the moment a crew would first ask, whether an earlier incident was already on record. Two possible rules are shown: an earlier incident that concerns one of the same parts, or one with the same kind of symptom on any element.</p>
     <div class="filters">${pl ? reveal : ''}</div>
-    <div class="tablewrap"><table><tr><th></th><th>#</th><th>Started</th><th>Element</th><th>Title</th><th>Seen before on the same element?</th><th>Seen before with the same symptom?</th>${S.reveal ? '<th class="key-col">Planted situation</th><th class="key-col">Honest answer when asked</th>' : ''}</tr>
+    <div class="tablewrap"><table><tr><th></th><th>#</th><th>Started</th><th>Element</th><th>Title</th><th>Seen before on a shared part?</th><th>Seen before with the same symptom?</th>${S.reveal ? '<th class="key-col">Planted situation</th><th class="key-col">Honest answer when asked</th>' : ''}</tr>
     ${d.incidents.map((i) => `<tr><td><button class="primary" data-replay="${i.id}">Replay</button></td><td class="num">${i.id}</td><td class="t">${fmt(i.t_start)}</td><td>${esc(i.element)}</td><td>${incLink(i.id, i.title)}</td>
       <td>${list(i.same_element)}</td><td>${list(i.same_symptom)}</td>${S.reveal ? `<td class="key-col">${cases[i.id] ? esc(cases[i.id].mode.replace(/_/g, ' ')) : ''}</td><td class="key-col">${cases[i.id] ? esc(cases[i.id].expected.verdict.replace(/_/g, ' ')) + ', ' + esc(cases[i.id].expected.next_step.replace(/_/g, ' ')) : ''}</td>` : ''}</tr>`).join('')}</table></div>
-    <p>Across these ${d.incidents.length} incidents, the same-element rule says "seen before" for <b>${d.known_by_same_element}</b>, the same-symptom rule for <b>${d.known_by_same_symptom}</b>, and they disagree on <b>${d.disagree}</b>.</p>
+    <p>Across these ${d.incidents.length} incidents, the shared-part rule says "seen before" for <b>${d.known_by_same_element}</b>, the same-symptom rule for <b>${d.known_by_same_symptom}</b>, and they disagree on <b>${d.disagree}</b>.</p>
     ${S.reveal && others.length ? `<h2>Planted situations that are not incidents</h2><ul>${others.map((c) => `<li>${esc(c.mode.replace(/_/g, ' '))} on ${esc(c.true_element)} at ${fmt(c.t_event)}: the honest answer is "${esc(c.expected.verdict.replace(/_/g, ' '))}". <button data-free="${c.ask_at}">Look at the Record when the crew asks</button></li>`).join('')}</ul>` : ''}`;
     return { html, mount() { if ($('#rv')) $('#rv').addEventListener('change', (ev) => { S.reveal = ev.target.checked; render(); }); } };
   }
@@ -945,10 +975,11 @@ PAGES.replay = async () => {
       : `<p>Nothing yet as an incident. ${d.entries.length} symptom entries are on record, but nobody has grouped them: the incident is opened at ${fmt(f.opened_at)}.</p>`}</div>
   <div class="card"><b>Learned in the last step</b>
     ${d.learned ? ((d.learned.changes.length || d.learned.entries.length) ? '<ul>' + d.learned.changes.map((c) => `<li>${esc(c.what)}</li>`).join('') + d.learned.entries.map((e) => `<li>entry ${entryLink(e.id)}: ${esc(describe(e))}</li>`).join('') + '</ul>' : '<p class="muted">Entries already on record were attached to the incident.</p>') : '<p class="muted">Press "next step".</p>'}</div></div>
+  <details ${RS.parts ? 'open' : ''} data-rs="parts"><summary><b>Parts this problem concerns, as known now</b> (${(d.parts || []).length})</summary>${partsTable(d.parts)}</details>
   ${replaySections(f.element)}
-  <details ${RS.seen ? 'open' : ''} data-rs="seen"><summary><b>Has this been seen before?</b> ${p.same_element.length} on the same element, ${p.same_symptom.length} with the same kind of symptom</summary>
+  <details ${RS.seen ? 'open' : ''} data-rs="seen"><summary><b>Has this been seen before?</b> ${p.same_element.length} on a shared part, ${p.same_symptom.length} with the same kind of symptom</summary>
   <p class="muted small">Earlier incidents on record at this moment, as the Record knew them now. Symptom kinds of this problem so far: <span class="mono">${p.symptom_kinds.map(esc).join(', ') || 'none on record yet'}</span>.</p>
-  <h3>On the same element (${p.same_element.length})</h3>${precTable(p.same_element)}
+  <h3>Concerning one of the same parts (${p.same_element.length})</h3>${precTable(p.same_element)}
   <h3>With the same kind of symptom, on any element (${p.same_symptom.length})</h3>${precTable(p.same_symptom)}</details>
   <details ${RS.entries ? 'open' : ''} data-rs="entries"><summary><b>Entries on record for this problem</b> (${d.entries.length})</summary>
   <p class="muted small">Before the incident is opened, only its symptoms are listed: they are what the crew is looking at. Evidence that an expert links later appears when that link is recorded, not before.</p>
@@ -963,7 +994,7 @@ PAGES.replay = async () => {
 };
 /* Collapsible views inside the replay page. They are the same drawings as the full pages,
    fed with the same as-of data. */
-const RS = { map: false, tl: false, seen: true, entries: false, view: null, viewFor: null };
+const RS = { map: false, tl: false, seen: true, entries: false, parts: true, view: null, viewFor: null };
 function replaySections(element) {
   return `<details ${RS.map ? 'open' : ''} data-rs="map"><summary><b>The detector at this moment</b></summary><div id="rs-map"></div><p class="small"><a href="#/detector">Open the detector page</a></p></details>
   <details ${RS.tl ? 'open' : ''} data-rs="tl"><summary><b>Timeline${element ? ' of ' + esc(element) : ''} up to this moment</b></summary><div id="rs-tl"></div>

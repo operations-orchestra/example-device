@@ -82,10 +82,7 @@ def next_known(store: RecordStore, q: dict, ctx: dict) -> dict:
 
 def overview(store: RecordStore, q: dict, ctx: dict) -> dict:
     as_of = _as_of(q)
-    experiment = store.elements("experiment")[0]
-    beam = store.entries(as_of, elements=[experiment], types=["beam_mode"])
-    periods = [{"mode": cur.payload["value"], "t0": cur.t_start, "t1": nxt.t_start if nxt else None}
-               for cur, nxt in zip(beam, beam[1:] + [None])]
+    periods = [{"mode": b["mode"], "t0": b["t_start"], "t1": b["t_end"]} for b in store.beam_modes(as_of)]
     counts = store.counts()
     return {
         "beam": periods,
@@ -129,6 +126,7 @@ def entry(store: RecordStore, q: dict, ctx: dict) -> dict:
         links.append({**asdict(link), "direction": "out" if link.src_entry_id == e.id else "in",
                       "other": _e(other)})
     return {"entry": _e(e), "links": links, "superseded_by": store.superseded_by(e.id, as_of),
+            "parts": [asdict(r) for r in store.parts(as_of, entry_id=e.id)],
             "incidents": [{"id": i, "role": r, "title": store.incident(i, as_of).title}
                           for i, r in store.incidents_of_entry(e.id, as_of)],
             "element_path": [e.element] + store.ancestors(e.element)}
@@ -152,14 +150,16 @@ def incident(store: RecordStore, q: dict, ctx: dict) -> dict:
             if link.src_entry_id in ids and link.dst_entry_id in ids:
                 links[link.id] = asdict(link)
     return {"incident": asdict(view), "entries": [{"role": r, **_e(e)} for r, e in rows],
-            "links": list(links.values())}
+            "links": list(links.values()), "parts": [asdict(r) for r in store.parts(as_of, incident_id=iid)]}
 
 
-# Readings come from the source archive through its adapter, never from the Record.
+# Readings and per-run data quality come from the source archives through their adapters,
+# never from the Record.
 READINGS = [("lv_voltage", "Low voltage", "V"), ("temperature", "Temperature", "°C")]
-QUANTITIES = [("occupancy_summary", "worst_ls_dead_fraction", "Dead channels (worst lumisection)", "fraction"),
-              ("occupancy_summary", "hot_fraction", "Hot channels", "fraction"),
-              ("occupancy_summary", "mean_occupancy", "Occupancy", "relative")]
+QUANTITIES = [("worst_ls_dead_fraction", "Dead channels (worst lumisection)", "fraction"),
+              ("hot_fraction", "Hot channels", "fraction"),
+              ("mean_occupancy", "Occupancy", "relative")]
+STATUS_TYPES = {"lv_voltage_status": "low voltage", "temperature_status": "temperature", "quality_status": "quality"}
 _FAULT_EVENTS = ("fed_out_of_sync", "data_integrity_errors", "config_change")
 _NOTES = ("shift_note", "followup", "root_cause", "closing_note")
 
@@ -183,28 +183,33 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
                   for box in shown]
         panels.append({"type": quantity, "key": "v", "label": label, "unit": unit, "per_run": False,
                        "from_source": True, "series": series})
-    for etype, key, label, unit in QUANTITIES:
+    dqm = ctx.get("dqm")
+    for key, label, unit in QUANTITIES:
         series = []
         for box in shown:
-            pts = []
-            for e in store.entries(as_of, elements=[box], types=[etype]):
-                pts.append({"id": e.id, "t0": e.t_start, "t1": e.t_end, "v": e.payload[key],
-                            "lo": e.payload.get("min"), "hi": e.payload.get("max")})
-            series.append({"box": box, "group": group_of[box], "points": pts})
-        panels.append({"type": etype, "key": key, "label": label, "unit": unit,
-                       "per_run": etype == "occupancy_summary", "series": series})
+            rows = dqm.fetch(box, t0, t1, as_of) if dqm else []
+            series.append({"box": box, "group": group_of[box],
+                           "points": [{"t0": r["t_start"], "t1": r["t_end"], "v": r[key], "run": r["run"]} for r in rows]})
+        panels.append({"type": key, "key": key, "label": label, "unit": unit, "per_run": True,
+                       "from_source": True, "series": series})
 
     experiment = store.elements("experiment")[0]
     detector_level = {n for n in marks if store.element_kind(n) in ("detector", "experiment")}
-    beam = store.entries(as_of, elements=[experiment], types=["beam_mode"])
-    strip = {"Stable beams": [], "Downtime": [], "Certified bad": [], "Reading status": [], "State change": [],
-             "Fault event": [], "Logbook note": []}
-    for cur, nxt in zip(beam, beam[1:] + [None]):
-        if cur.payload["value"] == "STABLE BEAMS":
-            strip["Stable beams"].append({"id": cur.id, "t0": cur.t_start, "t1": nxt.t_start if nxt else None,
-                                          "text": "stable beams"})
+    strip = {"Stable beams": [], "Downtime": [], "Not certified yet": [], "Certified bad": [], "Reading status": [],
+             "Quality status": [], "State change": [], "Fault event": [], "Logbook note": []}
+    for b in store.beam_modes(as_of):
+        if b["mode"] == "STABLE BEAMS":
+            strip["Stable beams"].append({"id": None, "t0": b["t_start"], "t1": b["t_end"], "text": "stable beams"})
+    # certification: a run is "not certified yet" for a subdetector until its completion is known
+    subs = [n for n in marks if store.element_kind(n) == "subdetector"]
+    done = {(c["run"], c["subdetector"]) for c in store.certification(as_of, subs)}
+    for r in store.runs(as_of):
+        missing = [sub for sub in subs if (r["run"], sub) not in done]
+        if missing:
+            strip["Not certified yet"].append({"id": None, "t0": r["t_start"], "t1": r["t_end"],
+                                               "text": f"run {r['run']}: not certified yet for {', '.join(missing)}"})
     t_first = store.time_span()[0]
-    for e in store.entries(as_of, elements=marks):
+    for e in store.entries(as_of, parts=marks):
         p = e.payload
         if e.type == "downtime":
             strip["Downtime"].append({"id": e.id, "t0": e.t_start, "t1": e.t_end,
@@ -224,15 +229,16 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
             routine = e.element in detector_level and not store.incidents_of_entry(e.id, as_of)
             strip["Logbook note"].append({"id": e.id, "t0": e.t_start, "routine": routine,
                                           "text": f"{p.get('author_role', '')}: {p.get('text', '')}"})
-    # reading status: one bar per stretch in which a shown box's reading was not normal
+    # status rows: one bar per stretch in which a shown box was not normal
     for box in shown:
-        for quantity, label, _ in READINGS:
-            changes = store.entries(as_of, elements=[box], types=[f"{quantity}_status"])
+        for stype, label in STATUS_TYPES.items():
+            changes = store.entries(as_of, elements=[box], types=[stype])
+            row = "Quality status" if stype == "quality_status" else "Reading status"
             for cur, nxt in zip(changes, changes[1:] + [None]):
                 if cur.payload["value"] != "normal":
-                    strip["Reading status"].append({
+                    strip[row].append({
                         "id": cur.id, "t0": cur.t_start, "t1": nxt.t_start if nxt else None, "value": cur.payload["value"],
-                        "text": f"{box} {label.lower()}: {cur.payload['value']} (recorded {to_iso(cur.known_at)})"})
+                        "text": f"{box} {label}: {cur.payload['value']} (recorded {to_iso(cur.known_at)})"})
     groups = sorted({g for g in group_of.values()})
     return {"element": name, "kind": store.element_kind(name), "boxes": shown, "n_boxes": len(boxes),
             "colour_by": "box" if len(shown) <= 4 else "subdetector", "groups": groups,
@@ -267,10 +273,15 @@ def detector_map(store: RecordStore, q: dict, ctx: dict) -> dict:
                     states[stype] = {"value": entry_.payload.get("value"), "since": entry_.t_start, "id": entry_.id}
         els.append({"name": name, "kind": kind, "parent": store.parent(name),
                     "related": store.related(name), "states": states})
+    beams = store.beam_modes(as_of)
+    if beams:
+        for el in els:
+            if el["kind"] == "experiment":
+                el["states"]["beam_mode"] = {"value": beams[-1]["mode"], "since": beams[-1]["t_start"], "id": None}
     flags = [{"element": e.element, "flag": e.payload.get("flag"), "id": e.id}
              for e in store.entries(as_of, types=["channel_flag"], t0=as_of, t1=as_of)]
-    open_issues = [asdict(i) for i in store.incidents(as_of)
-                   if i.status in ("open", "mitigated") and i.t_start <= as_of]
+    open_issues = [{**asdict(i), "parts": [{"element": r.element, "role": r.role} for r in store.parts(as_of, incident_id=i.id)]}
+                   for i in store.incidents(as_of) if i.status in ("open", "mitigated") and i.t_start <= as_of]
     return {"elements": els, "flags": flags, "open_issues": open_issues}
 
 
@@ -376,7 +387,8 @@ def replay(store: RecordStore, q: dict, ctx: dict) -> dict:
             "steps": store.incident_step_times(iid),
             "incident": asdict(view) if view else None,
             "entries": [{"role": r, **_e(e)} for r, e in rows], "links": list(links.values()),
-            "precedents": prec.at_moment(store, iid, as_of), "learned": learned}
+            "precedents": prec.at_moment(store, iid, as_of), "learned": learned,
+            "parts": [asdict(r) for r in store.parts(as_of, incident_id=iid)]}
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -388,7 +400,10 @@ SOURCE_SPOTS = {
     "voltage": ("example_device/generator.py", "# readings: the full series go to the control-system archive"),
     "status_rule": ("example_device/readings.py", "RULES = {"),
     "adapter": ("adapters/control_archive.py", "    def fetch("),
-    "quality": ("example_device/generator.py", "# data-quality summary per run and box; certification per run and subdetector"),
+    "quality": ("example_device/generator.py", "# data quality: every run's numbers per box go to the data-quality archive"),
+    "calendar_write": ("example_device/generator.py", "# the calendar: beam modes, fills and runs"),
+    "certification": ("example_device/generator.py", "# certification: completed per run and subdetector"),
+    "parts": ("example_device/generator.py", "    def ref("),
     "note": ("example_device/texts.py", "T: dict[str, list[str]] = {"),
     "direct_link": ("example_device/generator.py", "def downtime("),
     "indirect_link": ("example_device/generator.py", "def conclude("),
@@ -495,6 +510,16 @@ def interfaces(store: RecordStore, q: dict, ctx: dict) -> dict:
     return {"interfaces": out}
 
 
+def _part_example(store: RecordStore, as_of: int) -> Optional[dict]:
+    """An incident whose parts arrived at different times: the best illustration of part references."""
+    best = None
+    for inc in store.incidents(as_of):
+        parts = store.parts(as_of, incident_id=inc.id)
+        if best is None or len({r.known_at for r in parts}) > len({r.known_at for r in best[1]}):
+            best = (inc, parts)
+    return {"incident": asdict(best[0]), "parts": [asdict(r) for r in best[1]]} if best else None
+
+
 def _archive_summary(archive) -> Optional[dict]:
     if archive is None:
         return None
@@ -511,8 +536,9 @@ def built(store: RecordStore, q: dict, ctx: dict) -> dict:
     volts = store.entries(as_of, types=["lv_voltage_status"])
     voltage = next((e for e in volts if e.payload["value"] == "drifting down"),
                    next((e for e in volts if e.payload["value"] != "normal"), volts[0] if volts else None))
-    quality = store.entries(as_of, types=["occupancy_summary"])
-    hot = next((e for e in quality if e.payload["hot_fraction"] > 0), quality[0] if quality else None)
+    quality = store.entries(as_of, types=["quality_status"])
+    hot = next((e for e in quality if e.payload["value"] == "hot channels"),
+               next((e for e in quality if e.payload["value"] != "normal"), quality[0] if quality else None))
     notes = store.entries(as_of, types=["shift_note"])
     note = next((e for e in notes if store.incidents_of_entry(e.id, as_of)), notes[0] if notes else None)
     incidents_ = store.incidents(as_of)
@@ -532,6 +558,9 @@ def built(store: RecordStore, q: dict, ctx: dict) -> dict:
             "incident_example": example, "source": source_spots(),
             "archive": _archive_summary(ctx.get("archive")),
             "status_rules": json.loads(store.meta().get("status_rules", "{}")),
+            "calendar": {"runs": len(store.runs(as_of)), "fills": len(store.fills(as_of)),
+                         "certified": len(store.certification(as_of))},
+            "part_example": _part_example(store, as_of),
             "share": {"status": sum(n for _, _, t, _, n in by_type if t.endswith("_status")),
                       "total": sum(n for *_, n in by_type)},
             "links": {"direct": _link_example(store, as_of, "downtime", "direct"),
@@ -557,12 +586,9 @@ def demo_device(store: RecordStore, q: dict, ctx: dict) -> dict:
     data = _planted(ctx)
     end = store.latest_known_at()
     experiment = store.elements("experiment")[0]
-    beam = store.entries(end, elements=[experiment], types=["beam_mode"])
-    stops = {e.payload["run"]: e for e in store.entries(end, types=["run_stop"])}
-    runs = [{"run": e.payload["run"], "fill": e.payload["fill"], "t0": e.t_start,
-             "t1": stops[e.payload["run"]].t_start, "n_ls": stops[e.payload["run"]].payload["n_ls"],
-             "reason": stops[e.payload["run"]].payload["reason"]}
-            for e in store.entries(end, types=["run_start"])]
+    beam = store.beam_modes(end)
+    runs = [{"run": r["run"], "fill": r["fill"], "t0": r["t_start"], "t1": r["t_end"], "n_ls": r["n_ls"],
+             "reason": r["stop_reason"]} for r in store.runs(end)]
     cases = []
     for case in data["planted"]:
         roles = dict()
@@ -573,8 +599,7 @@ def demo_device(store: RecordStore, q: dict, ctx: dict) -> dict:
         inc = store.incident(case["incident_id"], end) if case["incident_id"] else None
         cases.append({**case, "entries": rows, "incident": asdict(inc) if inc else None})
     return {"modes": data.get("modes", {}), "cases": cases, "runs": runs,
-            "beam": [{"mode": c.payload["value"], "t0": c.t_start, "t1": n.t_start if n else None}
-                     for c, n in zip(beam, beam[1:] + [None])]}
+            "beam": [{"mode": b["mode"], "t0": b["t_start"], "t1": b["t_end"]} for b in beam]}
 
 
 ROUTES: dict[str, Callable[[RecordStore, dict, dict], dict]] = {

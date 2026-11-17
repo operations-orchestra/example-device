@@ -24,9 +24,11 @@ never touch the database need it too.
 ## What has been done
 
 **The tables.** `element` (parts of the detector), `element_relation` (which supply powers a
-box, which FED reads it), `entry` (one row per recorded thing), `link` (between two entries),
-`incident` and `incident_entry` (problems and the entries that belong to them),
-`query_log` (every read the agent's tools will make), `meta` (what built this Record).
+box, which FED reads it), `entry` (one row per recorded thing), `part_ref` (every part an entry
+or incident concerns, with a role and its own time), `link` (between two entries), `incident` and
+`incident_entry` (problems and the entries that belong to them), the calendar (`fill`, `run`,
+`beam_mode`), `certification` (when each run was certified per subdetector), `query_log` (every
+read the agent's tools will make), `meta` (what built this Record).
 
 **The write API.** `add_element`, `relate`, `add_entry`, `supersede`, `add_link`,
 `open_incident`, `attach`, `label_incident`, `set_incident_end`, `close_incident`,
@@ -58,8 +60,8 @@ times or a frame, never later content.
 
 ## Known limits
 
-- **One element per entry and per incident.** A root cause often involves several parts.
-  This was a schema shortcut, not a modelling decision. (To do; see `docs/DESIGN.md` 7b.)
+- **Part references are written by the generator**, which knows where it planted each fault.
+  In production the summarizer would propose them and experts confirm them.
 - **Entry types are free strings.** There are 19 in the `tiny` Record and 20 in `small`,
   because that is what the generator writes. Nothing lists them, defines them, or says
   which class and kind each belongs to; the class is repeated on every row.
@@ -77,9 +79,8 @@ times or a frame, never later content.
 
 In rough order of how much else depends on them:
 
-1. **Several elements per entry and incident**: a table "this entry concerns these
-   elements", each with a role. Changes the read API, the detector map, timelines and the
-   "same element" precedent rule.
+1. **The detector model**: integrate cmscoord (`docs/DETECTOR_PLAN.md`); `part_ref` would then
+   hold cmscoord part identifiers.
 2. **A catalogue of entry types**: one row per (source, type) with its class, kind, unit,
    meaning, expected payload fields and owning subsystem. The class moves off each entry.
    New types are registered, not invented; the GUI can group and colour by it.
@@ -89,3 +90,17 @@ In rough order of how much else depends on them:
 5. **Plots attached to incidents**: an entry holding a pointer to an image, in practice
    mostly logbook attachments (`docs/DESIGN.md` 7a).
 6. **PostgreSQL port with write roles**, once the schema settles.
+
+## Changes on 17 November 2026
+
+Decided by the project lead, to stop routine records dominating the Record (`small` went from
+5,084 entries to 763):
+
+| What | Before | Now |
+|---|---|---|
+| Per-run data quality per box | one entry per run and box (62%) | numbers stay in a data-quality archive; one `quality_status` entry per change, against a reference per subdetector (`quality_reference`) |
+| Runs, fills, beam modes | entries (8% plus 2%) | calendar tables `run`, `fill`, `beam_mode`; only fault stops and non-routine configure attempts stay entries |
+| Certification | a flag per run and subdetector (15%) | `certification` records when each was completed; only bad ranges are entries; good is inferred (`lumisection_status`) |
+| Parts | one element per entry and incident | `part_ref`, with roles and times; `entry.element_id` and `incident.element_id` keep a copy of the filed or reported part |
+
+The "same element" precedent rule became "shares a part".
