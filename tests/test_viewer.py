@@ -304,3 +304,17 @@ def test_interfaces_page_is_read_from_the_skeletons(call, end):
         if i["example"].get("produces"):
             src, typ = i["example"]["produces"].split("/")
             assert i["produced"]["source"] == src and i["produced"]["type"] == typ
+
+
+def test_replay_explains_only_the_steps_already_reached(call, tiny, store):
+    first, second = [c for c in tiny["planted_cases"] if c["mode"] == "configure_failure"]
+    iid = first["incident_id"]
+    _, full = call("replay", id=iid, as_of=store.latest_known_at())
+    steps = full["steps"]
+    mid = steps[len(steps) // 2]
+    _, body = call("replay", id=iid, as_of=mid)
+    assert {int(t) for t in body["step_notes"]} == {t for t in steps if t <= mid}
+    assert all(body["step_notes"][str(t)] for t in steps if t <= mid)     # every step reached says something
+    texts = [x for v in full["step_notes"].values() for x in v]
+    assert "incident opened" in texts and "cause confirmed" in texts and "configure failed" in texts
+    assert any(x.startswith("cause: ") for x in texts)

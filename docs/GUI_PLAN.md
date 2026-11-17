@@ -397,3 +397,12 @@ clicking through a replay (step, Play, jumps, Exit), drag-to-zoom, and the answe
   and "Not certified yet" rows; beams and runs come from the calendar tables; entries, incidents
   and the replay page list the parts they concern, with roles and times; the map shows an open
   issue on every part it concerns; the Tables page shows the five new tables.
+- **Replay steps explained.** A step is a moment at which the Record learned something about the
+  problem: a symptom recorded, the incident opened, an entry or a part linked, or a label written.
+  An entry counts at its own time only if it is a symptom; otherwise when it is linked, so steps
+  never hint at evidence before it is linked. Each entry's few-word description (`short_text` in
+  `viewer/api.py`) is written above its dot on the Happened line, repeated ones grouped; the ones
+  learned at the latest step are highlighted, and a banner says what that step taught. Hovering a
+  step reached shows what it taught; later steps show nothing but their time.
+- **Timestamps** are shown short ("Mar 12 02:00", no year, no seconds); hovering one shows the
+  full UTC time. Chart labels and tooltips use the short form.

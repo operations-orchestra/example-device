@@ -7,8 +7,16 @@
 const S = { meta: null, asOf: 0, replay: null, elements: [], planted: null, reveal: false };
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const fmt = (t) => (t == null ? '–' : new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' '));
-const fmtShort = (t) => fmt(t).slice(5, 16);
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/* Timestamps: a short form on screen ("Mar 2 12:06"), the full one on hover. */
+const fmtFull = (t) => (t == null ? '–' : new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' ') + ' UTC');
+const fmt = (t) => {
+  if (t == null) return '–';
+  const d = new Date(t * 1000);
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()} ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+};
+const tm = (t) => (t == null ? '–' : `<span class="ts" title="${fmtFull(t)}">${fmt(t)}</span>`);
+const fmtShort = fmt;
 const num = (v) => (v == null ? '–' : Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 1 ? (+v.toFixed(3)).toString() : (+v.toFixed(4)).toString());
 function parseT(s) {
   const m = Date.parse(s.trim().replace(' ', 'T').replace(/Z$/, '') + 'Z');
@@ -50,13 +58,13 @@ function partsTable(parts) {
   if (!parts || !parts.length) return `<p class="muted">None ${S.replay ? 'known yet' : 'recorded'}.</p>`;
   const sorted = [...parts].sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.known_at - b.known_at);
   return `<div class="tablewrap"><table><tr><th>Role</th><th>Part</th><th>Known to the Record</th><th>Said by</th><th>Status</th></tr>${sorted.map((r) =>
-    `<tr><td><span class="role role-${r.role}">${r.role}</span></td><td>${elLink(r.element)}</td><td class="t">${fmt(r.known_at)}</td><td class="mono small">${esc(r.producer)}</td><td>${r.status}</td></tr>`).join('')}</table></div>`;
+    `<tr><td><span class="role role-${r.role}">${r.role}</span></td><td>${elLink(r.element)}</td><td class="t">${tm(r.known_at)}</td><td class="mono small">${esc(r.producer)}</td><td>${r.status}</td></tr>`).join('')}</table></div>`;
 }
 const statusCell = (s) => `<span class="status">${s}</span>`;
 const ENTRY_HEAD = '<th>Happened</th><th>Known to the Record</th><th class="num">id</th><th>Class</th><th>Source / type</th><th>Element</th><th>What</th>';
 function entryRows(entries, extra) {
   return entries.map((e) => `<tr class="click" data-go="#/entry/${e.id}">
-    ${extra ? extra(e) : ''}<td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td>
+    ${extra ? extra(e) : ''}<td class="t">${tm(e.t_start)}</td><td class="t">${tm(e.known_at)}</td>
     <td class="num">${e.id}</td><td>${clsTag(e.record_class)}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td>
     <td class="what">${esc(describe(e))}</td></tr>`).join('');
 }
@@ -101,7 +109,7 @@ function drawBar() {
   if (!S.replay) return;
   const r = S.replay;
   bar.innerHTML = `<div class="clock-row"><b>${r.id ? `Replay of incident #${r.id} is on.` : 'Looking at a past moment.'}</b>
-    <span>Every page shows the Record as it stood at <b>${fmt(S.asOf)}</b> UTC, and nothing learned later.</span>
+    <span>Every page shows the Record as it stood at <b>${tm(S.asOf)}</b> UTC, and nothing learned later.</span>
     <span class="spacer"></span><a href="#/replay">Back to the replay</a><button id="rp-exit">Exit replay</button></div>`;
   $('#rp-exit').addEventListener('click', exitReplay);
 }
@@ -361,7 +369,7 @@ function mapSvg(d, width) {
 function mapHeader(d) {
   const top = d.elements.filter((e) => e.kind === 'experiment' || e.kind === 'detector');
   const bits = top.map((e) => `<b>${elLink(e.name)}</b> <span class="muted">${e.kind}</span>` +
-    Object.entries(e.states).map(([k, v]) => ` · ${k.replace(/_/g, ' ')}: <b>${esc(v.value)}</b> since ${fmt(v.since)}`).join('') +
+    Object.entries(e.states).map(([k, v]) => ` · ${k.replace(/_/g, ' ')}: <b>${esc(v.value)}</b> since ${tm(v.since)}`).join('') +
     d.open_issues.filter((i) => i.element === e.name).map((i) => ` · <a href="#/incident/${i.id}">open issue #${i.id}</a> (${i.status})`).join(''));
   return `<p>${bits.join('<br>')}</p>`;
 }
@@ -401,7 +409,7 @@ function rawTable(t, highlight) {
   if (!t.rows.length) return '<p class="muted">No rows at this time.</p>';
   const cell = (col, v) => {
     if (v == null) return '<span class="unknown">empty</span>';
-    if (TIME_COL.test(col)) return `<span data-tip="stored as ${v} (seconds since 1970, UTC)">${fmt(v)}</span>`;
+    if (TIME_COL.test(col)) return `<span data-tip="${fmtFull(v)}, stored as ${v} (seconds since 1970)">${fmt(v)}</span>`;
     const str = String(v);
     return str.length > 46 ? `<span data-tip="${esc(str)}">${esc(str.slice(0, 44))}…</span>` : esc(str);
   };
@@ -411,36 +419,55 @@ function rawTable(t, highlight) {
 
 const ROLE_CLASS = { symptom: 'c1', downtime: 'c2', action: 'c3', certification: 'c4', cause: 'c5', closing_note: 'c5', evidence: 'c7' };
 const ROLE_LABEL = { symptom: 'symptom', downtime: 'downtime', action: 'action taken', certification: 'certification', cause: 'cause or closing note', evidence: 'evidence linked by an expert' };
-function knowledgeChart(inc, entries, width, steps) {
+function knowledgeChart(inc, entries, width, steps, notes) {
   // Time is drawn relative to the start of the incident on a compressed scale, so minutes
   // and weeks fit on one axis: equal distance means ten times longer.
   const f = (dt) => Math.sign(dt) * Math.log10(1 + Math.abs(dt) / 60);
-  const off = steps ? 44 : 0;
-  const L = 118, R = 20, W = Math.max(520, width), yTop = 56 + off, yBot = 170 + off, H = 232 + off;
+  const L = 118, R = 20, W = Math.max(520, width), LABELS = 128;
+  const ys = 22, yTop = (steps ? ys + 22 : 14) + LABELS, yBot = yTop + 110, H = yBot + 50;
   const all = entries.flatMap((e) => [e.t_start - inc.t_start, e.known_at - inc.t_start]).concat(S.replay ? [S.asOf - inc.t_start, 0] : [0])
     .concat(steps ? steps.map((t) => t - inc.t_start) : []);
   const lo = f(Math.min(...all)) - 0.2, hi = f(Math.max(...all)) + 0.2;
   const X = (dt) => L + ((f(dt) - lo) / (hi - lo)) * (W - L - R);
+  const top = steps ? ys - 12 : yTop - LABELS;
   let s = `<text x="${L - 8}" y="${yTop + 4}" text-anchor="end">Happened</text><text x="${L - 8}" y="${yBot + 4}" text-anchor="end">Known</text>
     <line class="axis" x1="${L}" x2="${W - R}" y1="${yTop}" y2="${yTop}"/><line class="axis" x1="${L}" x2="${W - R}" y1="${yBot}" y2="${yBot}"/>`;
   const marks = [[-7 * 86400, '1 wk before'], [-86400, '1 d before'], [-6 * 3600, '6 h before'], [-3600, '1 h before'], [-600, '10 min before'], [0, 'start'],
     [600, '+10 min'], [3600, '+1 h'], [6 * 3600, '+6 h'], [86400, '+1 d'], [7 * 86400, '+1 wk'], [14 * 86400, '+2 wk'], [28 * 86400, '+4 wk']];
   for (const [dt, label] of marks) {
     if (f(dt) < lo || f(dt) > hi) continue;
-    s += `<line class="grid" x1="${X(dt)}" x2="${X(dt)}" y1="${yTop - 14 - off}" y2="${yBot + 14}"/><text x="${X(dt)}" y="${yBot + 30}" text-anchor="middle">${label}</text>`;
+    s += `<line class="grid" x1="${X(dt)}" x2="${X(dt)}" y1="${top}" y2="${yBot + 14}"/><text x="${X(dt)}" y="${yBot + 30}" text-anchor="middle">${label}</text>`;
   }
   if (S.replay) {
     const xn = X(S.asOf - inc.t_start);
-    s += `<rect class="future" x="${xn}" y="${yTop - 14 - off}" width="${Math.max(0, W - R - xn)}" height="${yBot - yTop + 28 + off}"/>
-      <line class="asof" x1="${xn}" x2="${xn}" y1="${yTop - 14 - off}" y2="${yBot + 14}"/>`;
+    s += `<rect class="future" x="${xn}" y="${top}" width="${Math.max(0, W - R - xn)}" height="${yBot + 14 - top}"/>
+      <line class="asof" x1="${xn}" x2="${xn}" y1="${top}" y2="${yBot + 14}"/>`;
   }
   if (steps) {
-    const ys = yTop - off + 2;
     s += `<text x="${L - 8}" y="${ys + 4}" text-anchor="end">Steps</text><line class="axis" x1="${L}" x2="${W - R}" y1="${ys}" y2="${ys}"/>`;
     steps.forEach((t, k) => {
       const here = t === S.asOf, past = t <= S.asOf;
-      s += `<circle class="hit step${here ? ' here' : past ? ' past' : ''}" cx="${X(t - inc.t_start)}" cy="${ys}" r="${here ? 8 : 5.5}" data-asof="${t}" data-tip="step ${k + 1}: ${fmt(t)}${past ? '' : '\n(later: click to go there)'}"/>`;
+      const said = notes && notes[String(t)] ? notes[String(t)].join('\n') : '';
+      const tip = past ? `step ${k + 1}: ${said || 'something was learned'}` : `step ${k + 1}, later: click to go there`;
+      s += `<circle class="hit step${here ? ' here' : past ? ' past' : ''}" cx="${X(t - inc.t_start)}" cy="${ys}" r="${here ? 8 : 5.5}" data-asof="${t}" data-tip="${esc(tip)}"/>`;
     });
+  }
+  // what happened, written on the Happened line: one label per entry, repeated ones grouped
+  const sorted = [...entries].sort((a, b) => a.t_start - b.t_start || a.id - b.id);
+  const lastStep = steps ? [...steps].reverse().find((t) => t <= S.asOf) : null;
+  const isFresh = (e) => !!S.replay && lastStep != null && e.known_at === lastStep;
+  const groups = [];
+  for (const e of sorted) {
+    const x = X(e.t_start - inc.t_start), g = groups[groups.length - 1];
+    if (g && g.text === e.short && x - g.lastX < 45) { g.n += 1; g.lastX = x; g.fresh = g.fresh || isFresh(e); continue; }
+    groups.push({ x, lastX: x, text: e.short || e.type, n: 1, fresh: isFresh(e) });
+  }
+  let lastX = -1e9;
+  for (const g of groups) {
+    const lx = Math.max(g.x, lastX + 24);         // keep rotated labels from overlapping (24 px apart = 15 px between lines)
+    lastX = lx;
+    if (lx - g.x > 1) s += `<line class="leader" x1="${g.x}" y1="${yTop - 6}" x2="${lx}" y2="${yTop - 12}"/>`;
+    s += `<text class="hlabel${g.fresh ? ' fresh' : ''}" transform="translate(${lx + 2},${yTop - 12}) rotate(-38)">${esc(g.text)}${g.n > 1 ? ` ×${g.n}` : ''}</text>`;
   }
   for (const e of entries) {
     const cls = e.role ? (ROLE_CLASS[e.role] || 'c1') : 'c0', a = X(e.t_start - inc.t_start), b = X(e.known_at - inc.t_start);
@@ -493,7 +520,7 @@ PAGES.detector = async () => {
   <h2>About this Record</h2>
   <dl class="facts card"><dt>File</dt><dd class="mono">${esc(m.path)} (${m.size_mb} MB, opened read-only) <button data-recfile>load a different Record</button></dd>
     <dt>Generated with</dt><dd>preset <b>${esc(m.preset)}</b>, seed ${esc(m.seed)}</dd>
-    <dt>Calendar</dt><dd>${fmt(m.t0)} to ${fmt(m.t1)} UTC</dd></dl>`;
+    <dt>Calendar</dt><dd>${tm(m.t0)} to ${tm(m.t1)} UTC</dd></dl>`;
   return { html, mount() { $('#map').innerHTML = mapSvg(d, $('#map').clientWidth); } };
 };
 
@@ -556,7 +583,7 @@ PAGES.built = async () => {
     ${row('<b>An indirect link</b><br><span class="small muted">an expert\'s reasoning</span>', `The fault script writes it as already confirmed, with one fixed sentence as the reason, at the moment the cause is recorded.${code('indirect_link')}`, linkCell(d.links.indirect),
       'Software <b>proposes</b> which observation supports which conclusion; an <b>expert</b> confirms, corrects or rejects each one.')}
     ${row('<b>Parts a record concerns</b><br><span class="small muted">beyond the one it was filed under</span>', `Names the other parts each entry and incident concerns, with a role and a time: the boxes a FED reads out, the supply behind a box, the box suspected and then confirmed as the cause${code('parts')}.`,
-      d.part_example ? `${incLink(d.part_example.incident.id, d.part_example.incident.title)}<br><span class="small">${d.part_example.parts.map((r) => `${r.role}: ${esc(r.element)}, ${fmt(r.known_at)}`).join('<br>')}</span>` : 'none',
+      d.part_example ? `${incLink(d.part_example.incident.id, d.part_example.incident.title)}<br><span class="small">${d.part_example.parts.map((r) => `${r.role}: ${esc(r.element)}, ${tm(r.known_at)}`).join('<br>')}</span>` : 'none',
       'The <b>summarizer</b> proposes which parts a note is about; <b>experts</b> confirm suspected and cause parts.')}
     ${row('<b>An incident</b><br><span class="small muted">entries grouped into one problem</span>', `Every planted fault gets a complete incident from its script: symptoms, action, recovery, usually a cause.${code('incident', 'one fault script')}`,
       inc ? `${incLink(inc.incident.id, inc.incident.title)}<br><span class="small">${inc.n_entries} entries, ${inc.n_links} expert links<br>recovery: ${esc(inc.incident.recovery_action || 'none')}<br>cause: ${esc(inc.incident.confirmed_cause || 'none')}</span>` : 'none in this Record',
@@ -595,7 +622,7 @@ async function tsIllustration(e, cad) {
   const samples = Math.round((t1 - t0) / cad);
   host.innerHTML = `<p class="small muted">One box's voltage over 10 hours: <b>${samples.toLocaleString()} samples fetched</b> from the source, <b>${rec.total} entries stored</b> in the Record.</p>` + chart.svg +
     `<p class="small"><b>Stored in the Record</b></p><div class="tablewrap"><table><tr><th>Status from</th><th>Recorded</th><th>Status</th><th>Reading</th><th>Pointer into the source</th></tr>${rec.entries.map((x) =>
-      `<tr class="click" data-go="#/entry/${x.id}"><td class="t">${fmt(x.t_start)}</td><td class="t">${fmt(x.known_at)}</td><td><b>${esc(x.payload.value)}</b></td><td>${x.payload.reading} ${esc(x.payload.unit)}</td><td class="mono small">${esc(x.raw_ref)}</td></tr>`).join('')}</table></div>`;
+      `<tr class="click" data-go="#/entry/${x.id}"><td class="t">${tm(x.t_start)}</td><td class="t">${tm(x.known_at)}</td><td><b>${esc(x.payload.value)}</b></td><td>${x.payload.reading} ${esc(x.payload.unit)}</td><td class="mono small">${esc(x.raw_ref)}</td></tr>`).join('')}</table></div>`;
 }
 
 /* 2b. interfaces of the parts not built ---------------------------------------------- */
@@ -725,8 +752,8 @@ PAGES.entry = async (parts) => {
   <div class="cols"><div class="card"><dl class="facts">
     <dt>Class</dt><dd>${e.record_class}</dd><dt>Source / type</dt><dd>${esc(e.source)} / ${esc(e.type)}</dd><dt>Kind</dt><dd>${e.kind}</dd>
     <dt>Element</dt><dd>${d.element_path.map(elLink).join(' &lsaquo; ')}</dd>
-    <dt>Happened</dt><dd>${fmt(e.t_start)}${e.t_end ? ' to ' + fmt(e.t_end) : ''}</dd>
-    <dt>Known to the Record</dt><dd>${fmt(e.known_at)} <span class="muted">(${dur(e.known_at - e.t_start)} after it started)</span></dd>
+    <dt>Happened</dt><dd>${tm(e.t_start)}${e.t_end ? ' to ' + fmt(e.t_end) : ''}</dd>
+    <dt>Known to the Record</dt><dd>${tm(e.known_at)} <span class="muted">(${dur(e.known_at - e.t_start)} after it started)</span></dd>
     <dt>Written by</dt><dd class="mono">${esc(e.producer)} ${esc(e.producer_version)}</dd>
     <dt>Source pointer</dt><dd class="mono">${esc(e.raw_ref)}</dd>
     <dt>Review status</dt><dd>${e.review_status}</dd>
@@ -741,7 +768,7 @@ PAGES.entry = async (parts) => {
   <h2>Links</h2>
   ${d.links.length ? `<div class="tablewrap"><table><tr><th>Link</th><th>Other entry</th><th>What it is</th><th>Reason given</th><th>Known</th></tr>${d.links.map((l) =>
     `<tr><td>${l.link_type}<br>${l.direction === 'out' ? 'this ' + esc(l.relation) + ' &#8594;' : '&#8592; ' + esc(l.relation) + ' this'}</td>
-     <td>${entryLink(l.other.id)}</td><td class="what">${esc(describe(l.other))}</td><td class="what">${esc(l.rationale)}</td><td class="t">${fmt(l.known_at)}</td></tr>`).join('')}</table></div>` : '<p class="muted">None.</p>'}`;
+     <td>${entryLink(l.other.id)}</td><td class="what">${esc(describe(l.other))}</td><td class="what">${esc(l.rationale)}</td><td class="t">${tm(l.known_at)}</td></tr>`).join('')}</table></div>` : '<p class="muted">None.</p>'}`;
   return { html };
 };
 
@@ -758,7 +785,7 @@ PAGES.incidents = async () => {
   <p class="lead">An incident groups the entries that belong to one problem and keeps three labels apart: what restored running, the confirmed cause, and whether the data were usable.</p>
   <div id="cal"></div>
   <div class="tablewrap"><table><tr><th>#</th><th>Started</th><th>Status</th><th>Element</th><th>Title</th><th>Recovery action</th><th>Confirmed cause</th><th>Certification</th><th></th></tr>
-  ${d.incidents.map((i) => `<tr class="click" data-go="#/incident/${i.id}"><td class="num">${i.id}</td><td class="t">${fmt(i.t_start)}</td><td>${statusCell(i.status)}</td><td>${esc(i.element)}</td><td>${esc(i.title)}</td>
+  ${d.incidents.map((i) => `<tr class="click" data-go="#/incident/${i.id}"><td class="num">${i.id}</td><td class="t">${tm(i.t_start)}</td><td>${statusCell(i.status)}</td><td>${esc(i.element)}</td><td>${esc(i.title)}</td>
     <td class="what">${i.recovery_action ? esc(i.recovery_action) : empty()}</td><td class="what">${i.confirmed_cause ? esc(i.confirmed_cause) : empty()}</td><td>${i.certification ? esc(i.certification) : empty()}</td>
     <td><button data-replay="${i.id}">Replay</button></td></tr>`).join('')}
   </table></div>${d.incidents.length ? '' : '<p class="muted">No incident is on record at this moment.</p>'}
@@ -780,7 +807,7 @@ PAGES.incident = async (parts) => {
   const html = `<h1>Incident #${i.id}: ${esc(i.title)}</h1>
   <div class="card"><dl class="facts">
     <dt>Status</dt><dd>${statusCell(i.status)}</dd><dt>Element</dt><dd>${elLink(i.element)}</dd>
-    <dt>Started</dt><dd>${fmt(i.t_start)}</dd>
+    <dt>Started</dt><dd>${tm(i.t_start)}</dd>
     <dt>Ended</dt><dd>${i.t_end ? fmt(i.t_end) + ` <span class="muted">(${dur(i.t_end - i.t_start)})</span>` : empty()}</dd>
     <dt>Recovery action</dt><dd>${i.recovery_action ? esc(i.recovery_action) : empty()}</dd>
     <dt>Confirmed cause</dt><dd>${i.confirmed_cause ? esc(i.confirmed_cause) : empty()}</dd>
@@ -797,9 +824,9 @@ PAGES.incident = async (parts) => {
   <div id="know"></div>
   <h2>Entries attached (${d.entries.length})</h2>
   <div class="tablewrap"><table><tr><th>Role</th>${ENTRY_HEAD}<th>Delay</th></tr>${d.entries.map((e) => `<tr class="click" data-go="#/entry/${e.id}"><td>${esc(e.role)}</td>
-    <td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${esc(describe(e))}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>
+    <td class="t">${tm(e.t_start)}</td><td class="t">${tm(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${esc(describe(e))}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>
   <h2>Expert reasoning</h2>
-  ${expert.length ? '<ul>' + expert.map((l) => `<li>entry ${entryLink(l.src_entry_id)} ${esc(l.relation)} entry ${entryLink(l.dst_entry_id)}: ${esc(l.rationale)} <span class="muted small">(recorded ${fmt(l.known_at)})</span></li>`).join('') + '</ul>' : `<p class="muted">No expert links ${S.replay ? 'yet' : 'recorded'}.</p>`}`;
+  ${expert.length ? '<ul>' + expert.map((l) => `<li>entry ${entryLink(l.src_entry_id)} ${esc(l.relation)} entry ${entryLink(l.dst_entry_id)}: ${esc(l.rationale)} <span class="muted small">(recorded ${tm(l.known_at)})</span></li>`).join('') + '</ul>' : `<p class="muted">No expert links ${S.replay ? 'yet' : 'recorded'}.</p>`}`;
   return { html, mount() { $('#know').innerHTML = knowledgeChart(i, d.entries, $('#know').clientWidth); } };
 };
 
@@ -899,13 +926,13 @@ PAGES.scenarios = async () => {
   ${cases.length > 1 ? `<div class="tabs">${cases.map((x, k) => `<button data-dv-idx="${k}" class="${x.id === c.id ? 'on' : ''}">${esc(x.true_element)} · ${fmtShort(x.t_event)}</button>`).join('')}</div>` : ''}
   <div class="card"><dl class="facts">
     <dt>Where the fault really is</dt><dd>${elLink(c.true_element)}</dd><dt>Where the crew sees it</dt><dd>${esc(c.reported_element)}</dd>
-    <dt>Starts</dt><dd>${fmt(c.t_event)}</dd>
+    <dt>Starts</dt><dd>${tm(c.t_event)}</dd>
     <dt>In the Record as</dt><dd>${c.incident ? incLink(c.incident.id, c.incident.title) + ` <button data-replay="${c.incident.id}">Replay</button>` : `no incident, because nothing is wrong <button data-free="${c.ask_at}">look at the Record at that moment</button>`}</dd>
   </dl></div>
   <h2>What the generator wrote for it</h2>
   <p class="muted small">Compare "happened" with "known": the gap is how late that piece reaches the Record.</p>
   <div class="tablewrap"><table><tr><th>Role</th>${ENTRY_HEAD}<th>Delay</th></tr>${c.entries.map((e) => `<tr class="click" data-go="#/entry/${e.id}"><td>${esc(e.role)}</td>
-    <td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${esc(describe(e))}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>`;
+    <td class="t">${tm(e.t_start)}</td><td class="t">${tm(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${esc(describe(e))}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>`;
   return { html, mount() {
     document.querySelectorAll('[data-dv-mode]').forEach((b) => b.addEventListener('click', () => { DV.mode = b.dataset.dvMode; DV.idx = 0; render(); }));
     document.querySelectorAll('[data-dv-idx]').forEach((b) => b.addEventListener('click', () => { DV.idx = +b.dataset.dvIdx; render(); }));
@@ -917,11 +944,11 @@ function answerKey(caseFor) {
   if (!caseFor) return '<p class="muted">The generator has no note for this one.</p>';
   const x = caseFor.expected;
   return `<dl class="facts"><dt>Planted situation</dt><dd>${esc(caseFor.mode.replace(/_/g, ' '))}</dd><dt>Really on</dt><dd>${esc(caseFor.true_element)}</dd>
-    <dt>Crew's question</dt><dd>${esc(caseFor.question)} <span class="muted">(asked at ${fmt(caseFor.ask_at)})</span></dd>
+    <dt>Crew's question</dt><dd>${esc(caseFor.question)} <span class="muted">(asked at ${tm(caseFor.ask_at)})</span></dd>
     <dt>Honest answer at that moment</dt><dd><b>${esc(x.verdict.replace(/_/g, ' '))}</b>; next step: ${esc(x.next_step.replace(/_/g, ' '))}${x.precedents.length ? '; seen before as ' + x.precedents.map((p) => '#' + p).join(' ') : ''}</dd></dl>`;
 }
 const precTable = (rows) => rows.length ? `<div class="tablewrap"><table><tr><th>#</th><th>Started</th><th>Element</th><th>Title</th><th>Status then</th><th>Recovery known then</th><th>Cause known then</th></tr>
-  ${rows.map((r) => `<tr class="click" data-go="#/incident/${r.id}"><td class="num">${r.id}</td><td class="t">${fmt(r.t_start)}</td><td>${esc(r.element)}</td><td>${esc(r.title)}</td><td>${statusCell(r.status)}</td>
+  ${rows.map((r) => `<tr class="click" data-go="#/incident/${r.id}"><td class="num">${r.id}</td><td class="t">${tm(r.t_start)}</td><td>${esc(r.element)}</td><td>${esc(r.title)}</td><td>${statusCell(r.status)}</td>
     <td class="what">${r.recovery_action ? esc(r.recovery_action) : empty()}</td><td class="what">${r.confirmed_cause ? esc(r.confirmed_cause) : empty()}</td></tr>`).join('')}</table></div>` : '<p class="muted">None.</p>';
 PAGES.replay = async () => {
   const pl = await planted();
@@ -941,20 +968,20 @@ PAGES.replay = async () => {
     <p class="muted small">"Seen before?" asks, at the moment a crew would first ask, whether an earlier incident was already on record. Two possible rules are shown: an earlier incident that concerns one of the same parts, or one with the same kind of symptom on any element.</p>
     <div class="filters">${pl ? reveal : ''}</div>
     <div class="tablewrap"><table><tr><th></th><th>#</th><th>Started</th><th>Element</th><th>Title</th><th>Seen before on a shared part?</th><th>Seen before with the same symptom?</th>${S.reveal ? '<th class="key-col">Planted situation</th><th class="key-col">Honest answer when asked</th>' : ''}</tr>
-    ${d.incidents.map((i) => `<tr><td><button class="primary" data-replay="${i.id}">Replay</button></td><td class="num">${i.id}</td><td class="t">${fmt(i.t_start)}</td><td>${esc(i.element)}</td><td>${incLink(i.id, i.title)}</td>
+    ${d.incidents.map((i) => `<tr><td><button class="primary" data-replay="${i.id}">Replay</button></td><td class="num">${i.id}</td><td class="t">${tm(i.t_start)}</td><td>${esc(i.element)}</td><td>${incLink(i.id, i.title)}</td>
       <td>${list(i.same_element)}</td><td>${list(i.same_symptom)}</td>${S.reveal ? `<td class="key-col">${cases[i.id] ? esc(cases[i.id].mode.replace(/_/g, ' ')) : ''}</td><td class="key-col">${cases[i.id] ? esc(cases[i.id].expected.verdict.replace(/_/g, ' ')) + ', ' + esc(cases[i.id].expected.next_step.replace(/_/g, ' ')) : ''}</td>` : ''}</tr>`).join('')}</table></div>
     <p>Across these ${d.incidents.length} incidents, the shared-part rule says "seen before" for <b>${d.known_by_same_element}</b>, the same-symptom rule for <b>${d.known_by_same_symptom}</b>, and they disagree on <b>${d.disagree}</b>.</p>
-    ${S.reveal && others.length ? `<h2>Planted situations that are not incidents</h2><ul>${others.map((c) => `<li>${esc(c.mode.replace(/_/g, ' '))} on ${esc(c.true_element)} at ${fmt(c.t_event)}: the honest answer is "${esc(c.expected.verdict.replace(/_/g, ' '))}". <button data-free="${c.ask_at}">Look at the Record when the crew asks</button></li>`).join('')}</ul>` : ''}`;
+    ${S.reveal && others.length ? `<h2>Planted situations that are not incidents</h2><ul>${others.map((c) => `<li>${esc(c.mode.replace(/_/g, ' '))} on ${esc(c.true_element)} at ${tm(c.t_event)}: the honest answer is "${esc(c.expected.verdict.replace(/_/g, ' '))}". <button data-free="${c.ask_at}">Look at the Record when the crew asks</button></li>`).join('')}</ul>` : ''}`;
     return { html, mount() { if ($('#rv')) $('#rv').addEventListener('change', (ev) => { S.reveal = ev.target.checked; render(); }); } };
   }
   if (r.id == null) {
     const d = r.prev != null && r.prev < S.asOf ? await api('diff', { since: r.prev }) : null;
-    const html = `<h1>The Record at ${fmt(S.asOf)}</h1>
+    const html = `<h1>The Record at ${tm(S.asOf)}</h1>
     <p class="lead">A past moment, without following a particular incident. A step is the next moment the Record learned anything.</p>
     ${stepControls()}
     ${replaySections(null)}
-    ${d ? `<h2>Learned in the last step</h2><p>${d.n_entries} entries, ${d.n_links} links, ${d.incident_changes.length} incident changes since ${fmt(d.from)}.</p>
-      ${d.incident_changes.length ? '<ul>' + d.incident_changes.map((c) => `<li>${fmt(c.t)} · ${incLink(c.incident_id, c.title)}: ${esc(c.what)}</li>`).join('') + '</ul>' : ''}
+    ${d ? `<h2>Learned in the last step</h2><p>${d.n_entries} entries, ${d.n_links} links, ${d.incident_changes.length} incident changes since ${tm(d.from)}.</p>
+      ${d.incident_changes.length ? '<ul>' + d.incident_changes.map((c) => `<li>${tm(c.t)} · ${incLink(c.incident_id, c.title)}: ${esc(c.what)}</li>`).join('') + '</ul>' : ''}
       <div class="tablewrap"><table><tr>${ENTRY_HEAD}</tr>${entryRows(d.entries)}</table></div>` : ''}`;
     return { html, mount() { wireSteps(); mountReplaySections(null); } };
   }
@@ -963,16 +990,18 @@ PAGES.replay = async () => {
   const caseFor = pl ? pl.cases.find((c) => c.incident_id === r.id) : null;
   const roles = [...new Set(d.entries.filter((e) => e.role).map((e) => (e.role === 'closing_note' ? 'cause' : e.role)))];
   const html = `<h1>Replay of incident #${f.id}: ${esc(f.title)}</h1>
-  <p class="lead">The problem starts at ${fmt(f.t_start)}. You are at <b>${fmt(S.asOf)}</b>, ${dur(Math.abs(S.asOf - f.t_start))} ${S.asOf >= f.t_start ? 'after' : 'before'} the start.</p>
+  <p class="lead">The problem starts at ${tm(f.t_start)}. You are at <b>${tm(S.asOf)}</b>, ${dur(Math.abs(S.asOf - f.t_start))} ${S.asOf >= f.t_start ? 'after' : 'before'} the start.</p>
   ${stepControls()}
   <h2>How knowledge has arrived so far</h2>
-  <p class="muted small">Top row: each step is a moment the Record learned something about this incident; click one to go there. Below, each entry is drawn when it happened and when it became known. The shaded part is still in the future. The scale is compressed: each step to the right is about ten times longer.</p>
+  ${(() => { const past = r.steps.filter((x) => x <= S.asOf), k = past.length, said = k ? d.step_notes[String(past[k - 1])] : null;
+    return `<p class="stepnow"><b>${k ? `Step ${k} of ${r.steps.length}` : 'Before the first step'}</b>${said ? `: the Record learned ${said.map(esc).join('; ')}` : ''}</p>`; })()}
+  <p class="muted small">A <b>step</b> is a moment at which the Record learned something about this problem: a symptom was recorded, the incident was opened, an entry or a part was linked to it, or a label was written. Hover a step to see what; click to go there. Below, each entry is drawn when it happened (with what happened written above it) and when it became known. The shaded part is still in the future; the scale is compressed.</p>
   <div class="key"><span><i class="c0"></i>a symptom on record, not yet linked to an incident</span>${roles.map((x) => `<span><i class="${ROLE_CLASS[x]}"></i>${ROLE_LABEL[x] || x}</span>`).join('')}</div>
   <div id="know"></div>
   <div class="cols"><div class="card"><b>What the Record says about this problem now</b>
     ${i ? `<dl class="facts"><dt>Status</dt><dd>${statusCell(i.status)}</dd><dt>Recovery action</dt><dd>${i.recovery_action ? esc(i.recovery_action) : empty()}</dd>
       <dt>Confirmed cause</dt><dd>${i.confirmed_cause ? esc(i.confirmed_cause) : empty()}</dd><dt>Certification</dt><dd>${i.certification ? esc(i.certification) : empty()}</dd></dl>`
-      : `<p>Nothing yet as an incident. ${d.entries.length} symptom entries are on record, but nobody has grouped them: the incident is opened at ${fmt(f.opened_at)}.</p>`}</div>
+      : `<p>Nothing yet as an incident. ${d.entries.length} symptom entries are on record, but nobody has grouped them: the incident is opened at ${tm(f.opened_at)}.</p>`}</div>
   <div class="card"><b>Learned in the last step</b>
     ${d.learned ? ((d.learned.changes.length || d.learned.entries.length) ? '<ul>' + d.learned.changes.map((c) => `<li>${esc(c.what)}</li>`).join('') + d.learned.entries.map((e) => `<li>entry ${entryLink(e.id)}: ${esc(describe(e))}</li>`).join('') + '</ul>' : '<p class="muted">Entries already on record were attached to the incident.</p>') : '<p class="muted">Press "next step".</p>'}</div></div>
   <details ${RS.parts ? 'open' : ''} data-rs="parts"><summary><b>Parts this problem concerns, as known now</b> (${(d.parts || []).length})</summary>${partsTable(d.parts)}</details>
@@ -987,7 +1016,7 @@ PAGES.replay = async () => {
   ${pl ? `<details ${S.reveal ? 'open' : ''} id="rvd"><summary><b>Answer key</b> <span class="muted small">the generator's own notes, never part of the Record</span></summary><div class="note keynote">${answerKey(caseFor)}</div></details>` : ''}`;
   return { html, mount() {
     wireSteps();
-    $('#know').innerHTML = knowledgeChart({ t_start: f.t_start }, d.entries, $('#know').clientWidth, r.steps);
+    $('#know').innerHTML = knowledgeChart({ t_start: f.t_start }, d.entries, $('#know').clientWidth, r.steps, d.step_notes);
     if ($('#rvd')) $('#rvd').addEventListener('toggle', (ev) => { S.reveal = ev.target.open; });
     mountReplaySections(f.element);
   } };
@@ -1086,7 +1115,7 @@ async function render() {
   } catch (e) {
     if (my !== token) return;
     main.innerHTML = `<h1>Nothing to show</h1><p>${esc(e.message)}</p>` +
-      (S.replay ? `<p class="muted">You are in a replay at ${fmt(S.asOf)}. If this was learned later, step forward or leave the replay.</p>` : '');
+      (S.replay ? `<p class="muted">You are in a replay at ${tm(S.asOf)}. If this was learned later, step forward or leave the replay.</p>` : '');
   }
 }
 document.addEventListener('click', (ev) => {

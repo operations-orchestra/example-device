@@ -59,8 +59,41 @@ def _element(store: RecordStore, q: dict, key: str = "element", required: bool =
     return name
 
 
+_QUANTITY = {"lv_voltage_status": "LV", "temperature_status": "temperature"}
+
+
+def short_text(e: StoredEntry) -> str:
+    """A few words saying what an entry records, for labels on charts."""
+    p, t = e.payload, e.type
+
+    def clip(text: str, n: int = 34) -> str:
+        return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+    if t in _QUANTITY:
+        return f"{e.element} {_QUANTITY[t]} {p.get('value')}"
+    return {
+        "quality_status": lambda: f"{e.element} quality: {p.get('value')}",
+        "quality_reference": lambda: f"{e.element} reference updated",
+        "supply_state": lambda: f"{e.element} {p.get('value')}",
+        "control_link": lambda: f"{e.element} link {p.get('value')}",
+        "configure": lambda: f"configure {p.get('result')}",
+        "downtime": lambda: f"downtime {p.get('duration_s', 0) // 60} min",
+        "cert_flag": lambda: f"{e.element} certified bad",
+        "channel_flag": lambda: f"{e.element.split('-')[-1]} {p.get('flag')}",
+        "fed_out_of_sync": lambda: f"{e.element} out of sync",
+        "data_integrity_errors": lambda: f"{e.element} integrity errors",
+        "run_stop": lambda: "run stopped",
+        "config_change": lambda: f"{e.element} threshold changed",
+        "followup": lambda: "follow-up: " + clip(p.get("text", ""), 32),
+        "root_cause": lambda: "root cause written",
+        "closing_note": lambda: "closed without a cause",
+        "shift_note": lambda: clip(p.get("text", "")),
+        "daily_run_summary": lambda: "daily run summary",
+    }.get(t, lambda: t.replace("_", " "))()
+
+
 def _e(entry: StoredEntry) -> dict[str, Any]:
-    return asdict(entry)
+    return {**asdict(entry), "short": short_text(entry)}
 
 
 # ----------------------------------------------------------------------------- endpoints
@@ -383,8 +416,26 @@ def replay(store: RecordStore, q: dict, ctx: dict) -> dict:
         learned = {"since": since,
                    "entries": [_e(e) for e in got["entries"] if e.id in ids],
                    "changes": [c for c in got["incident_changes"] if c["incident_id"] == iid]}
+    steps = store.incident_step_times(iid)
+    # what each step taught, for steps already reached (later ones stay times only)
+    labels = {"known_at": "incident opened", "recovery_action": "recovery action recorded",
+              "confirmed_cause": "cause confirmed", "certification": "certification recorded"}
+    notes: dict[int, list[str]] = {t: [] for t in steps if t <= as_of}
+    for role, e in store.incident_entries_seen(iid, as_of):
+        if e.known_at in notes:
+            notes[e.known_at].append(short_text(e))
+    for r in store.parts(as_of, incident_id=iid):
+        if r.known_at in notes and r.role != "reported":
+            notes[r.known_at].append(f"{r.role}: {r.element}")
+    for t in notes:                         # incident changes: compare the incident just before and at t
+        was, now = store.incident(iid, t - 1), store.incident(iid, t)
+        if now and not was:
+            notes[t].append(labels["known_at"])
+        for field in ("recovery_action", "confirmed_cause", "certification"):
+            if now and getattr(now, field) and not (was and getattr(was, field)):
+                notes[t].append(labels[field])
     return {"frame": frame, "ask_time": prec.first_ask_time(store, iid),
-            "steps": store.incident_step_times(iid),
+            "steps": steps, "step_notes": {str(t): sorted(set(v), key=v.index) for t, v in notes.items()},
             "incident": asdict(view) if view else None,
             "entries": [{"role": r, **_e(e)} for r, e in rows], "links": list(links.values()),
             "precedents": prec.at_moment(store, iid, as_of), "learned": learned,

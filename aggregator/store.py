@@ -695,9 +695,11 @@ class RecordStore:
 
     def incident_step_times(self, incident_id: int) -> list[int]:
         """Every moment at which the Record learned something about this incident. Times only."""
+        # an entry counts at its own known-at time only if it is a symptom (visible before anyone
+        # links it); every other entry counts when it is attached to the incident
         parts = ["SELECT ie.known_at AS k FROM incident_entry ie WHERE ie.incident_id = ?",
                  "SELECT e.known_at FROM incident_entry ie JOIN entry e ON e.id = ie.entry_id "
-                 "WHERE ie.incident_id = ?", "SELECT known_at FROM part_ref WHERE incident_id = ?"]
+                 "WHERE ie.incident_id = ? AND ie.role = 'symptom'", "SELECT known_at FROM part_ref WHERE incident_id = ?"]
         params = [incident_id, incident_id, incident_id]
         for c in self._INCIDENT_TIMES:
             parts.append(f"SELECT {c} FROM incident WHERE id = ?")

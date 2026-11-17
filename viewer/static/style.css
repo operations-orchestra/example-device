@@ -174,3 +174,7 @@ svg .pending { fill: var(--grid); stroke: var(--axis); stroke-dasharray: 3 2; }
 .role { display: inline-block; font-size: 11px; border-radius: 4px; padding: 0 6px; border: 1px solid var(--axis); }
 .role-filed, .role-reported { background: var(--grid); } .role-cause { border-color: var(--critical); color: var(--critical); font-weight: 600; }
 .role-suspected { border-color: var(--serious); border-style: dashed; } .role-affected { border-color: var(--s1); }
+svg .hlabel { fill: var(--ink2); font-size: 10.5px; } svg .hlabel.fresh { fill: var(--accent); font-weight: 700; }
+svg .leader { stroke: var(--axis); stroke-width: 1; }
+.stepnow { background: var(--surface); border: 1px solid var(--grid); border-left: 4px solid var(--accent); border-radius: 0 6px 6px 0; padding: 6px 12px; }
+.ts { white-space: nowrap; border-bottom: 1px dotted var(--axis); cursor: help; }
