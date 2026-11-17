@@ -384,3 +384,11 @@ clicking through a replay (step, Play, jumps, Exit), drag-to-zoom, and the answe
   files under the starting folder (`out/`) with preset, seed, entries and size, and takes a
   typed path. The service switches with `POST /api/use`; the file must open as a Record.
   Files are still opened read-only.
+- **How time series are treated** (on "How the Record is built"): the scheme in two lines of
+  boxes (source, status rule, Record; and the adapter fetching on demand), one real series from
+  the archive drawn with the few entries the Record keeps for it, and the four options with
+  which are used. The generator's own row now says only what the generator does.
+- **Interfaces of unbuilt parts** (under section 2): one card per unbuilt part, read from its
+  skeleton code by `viewer/api.py` (`interfaces`), with what it takes and gives, its data
+  records, contracts and method signatures linked to the source, the implementations still to
+  write, and one real entry of the kind it would produce.

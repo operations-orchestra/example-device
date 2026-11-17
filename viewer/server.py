@@ -40,7 +40,7 @@ def handle_api(db_path: Path, planted: Optional[Path], route: str, query: dict[s
         store.close()
 
 
-SOURCE_DIRS = ("example_device", "aggregator", "utils", "viewer", "adapters")
+SOURCE_DIRS = ("example_device", "aggregator", "utils", "viewer", "adapters", "anonymizer", "summarizer", "sparsifier", "orchestrator")
 
 
 def source_page(rel: str) -> Optional[bytes]:

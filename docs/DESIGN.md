@@ -252,11 +252,15 @@ Commands: `orchestra ask "..." --as-of TIME` and `orchestra demo`, which prints 
 cases: a new problem that is escalated; a recurrence recalled with its fix; a precedent
 found before its fix was recorded.
 
-### 6.3 Feed interfaces
+### 6.3 Interfaces of the unbuilt parts (written 17 November 2026)
 
-One interface file each in `adapters/`, `anonymizer/`, `summarizer/`, `sparsifier/`,
-with docstrings saying what real code must supply. Each returns `utils.Entry` objects.
-`summarizer` and `adapters` have no repository in the organization yet.
+Each unbuilt part exists as code that fixes its interface, with every method raising
+`NotImplementedError`: `adapters/base.py` (the `SourceAdapter` contract, `RawRecord`, and five
+adapters to write), `anonymizer/`, `summarizer/`, `sparsifier/`, `aggregator/linker.py`
+(direct links), `orchestrator/tools.py` and `orchestrator/agent.py`. Each module also declares
+`STATUS`, `ROLE` and an `EXAMPLE` of what it takes and gives. The GUI page "Interfaces of
+unbuilt parts" is read from these files, and a test checks that every method of a skeleton
+still refuses to run. The detector model has no interface file yet; see DETECTOR_PLAN.md.
 
 ### 6.4 Deliberately left out
 

@@ -282,3 +282,24 @@ def test_timeline_for_the_whole_experiment_shows_every_box(call, store, end):
     assert sorted(body["boxes"]) == sorted(store.elements("readout_box"))
     volts = next(p for p in body["panels"] if p["type"] == "lv_voltage")
     assert all(s["group"] in body["groups"] for s in volts["series"])
+
+
+def test_interfaces_page_is_read_from_the_skeletons(call, end):
+    import importlib
+    import inspect
+
+    _, body = call("interfaces", as_of=end)
+    titles = [i["title"] for i in body["interfaces"]]
+    assert {"Source adapters", "Anonymizer", "Summarizer", "Sparsifier", "Query tools", "Diagnosis agent"} <= set(titles)
+    for i in body["interfaces"]:
+        assert i["role"] and i["items"], i["title"]
+        if i["status"] == "skeleton":                # every method of an unbuilt part refuses to run
+            module = importlib.import_module(i["file"][:-3].replace("/", ".").replace(".__init__", ""))
+            for item in i["items"]:
+                obj = getattr(module, item["name"])
+                funcs = [obj] if item["kind"] == "function" else [getattr(obj, m["signature"].split("(")[0]) for m in item["methods"]]
+                for f in funcs:
+                    assert "raise NotImplementedError" in inspect.getsource(f), (i["title"], item["name"])
+        if i["example"].get("produces"):
+            src, typ = i["example"]["produces"].split("/")
+            assert i["produced"]["source"] == src and i["produced"]["type"] == typ

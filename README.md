@@ -26,8 +26,8 @@ behind it, the next steps and hand-off notes are in [docs/DESIGN.md](docs/DESIGN
 | `example_device/` | the seeded generator for the synthetic device | runs |
 | `viewer/` | a local, read-only web page for looking inside the Record and its components | runs |
 | `adapters/` | reads a source system on demand; one so far, for the simulated control-system archive | runs |
-| `orchestrator/` | typed query tools and the diagnosis agent | not built yet |
-| `anonymizer/`, `summarizer/`, `sparsifier/`, other adapters | the rest of the feed into the Record | not built yet |
+| `orchestrator/` | typed query tools and the diagnosis agent | interfaces only |
+| `anonymizer/`, `summarizer/`, `sparsifier/`, `adapters/base.py`, `aggregator/linker.py` | the rest of the feed into the Record, and the direct-link builder | interfaces only: every method raises `NotImplementedError`; the GUI page "Interfaces of unbuilt parts" is read from them |
 
 The folders are named after the repositories of the `operations-orchestra` organization
 so each can move to its own repository later. A test keeps their imports separate.

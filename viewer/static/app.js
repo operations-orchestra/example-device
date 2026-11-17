@@ -442,7 +442,7 @@ function knowledgeChart(inc, entries, width, steps) {
 const PAGES = {};
 const NAV = [
   ['1', 'detector', 'The detector'],
-  ['2', 'built', 'How the Record is built'],
+  ['2', 'built', 'How the Record is built', [['built', 'Overview'], ['interfaces', 'Interfaces of unbuilt parts']]],
   ['3', 'tables', 'What is in the Record', [['tables', 'Tables'], ['record', 'Entries'], ['incidents', 'Incidents'], ['timeline', 'Timeline']]],
   ['4', 'scenarios', 'Scenarios in this demo'],
   ['5', 'replay', 'Replay'],
@@ -488,7 +488,7 @@ PAGES.built = async () => {
   const d = await api('built');
   const ex = d.examples, src = d.source, arc = d.archive;
   const cad = d.config.raw_cadence_s, every = cad >= 60 ? `${cad / 60} minute${cad === 60 ? '' : 's'}` : `${cad} s`;
-  const box = (name, what, state) => `<div class="box ${state}"><b>${name}</b>${what}</div>`;
+  const box = (name, what, state) => (state === 'off' && name !== 'Existing systems' ? `<a class="box ${state}" href="#/interfaces"><b>${name}</b>${what}</a>` : `<div class="box ${state}"><b>${name}</b>${what}</div>`);
   const code = (key, label) => (src[key] ? ` <a class="code" href="${src[key].href}" target="_blank" rel="noopener">${label || 'code'}: ${esc(src[key].file)}:${src[key].line}</a>` : '');
   const entryCell = (e) => (e ? `<span class="mono small">entry ${entryLink(e.id)} · ${esc(e.source)}/${esc(e.type)} · ${esc(e.element)}<br>${esc(JSON.stringify(e.payload))}</span>` : 'none in this Record');
   const linkCell = (x) => (x ? `<span class="mono small">link ${x.link.id} · ${x.link.link_type} · ${esc(x.link.relation)} · ${x.link.status}</span><br>
@@ -512,15 +512,32 @@ PAGES.built = async () => {
     ${box('Aggregator', 'the same code', 'real')}<span class="arrow">&#8594;</span><a class="box real" href="#/tables"><b>The Record</b>the same database</a></div>
   <div class="flow"><div class="box demo" style="flex:4 1 560px"><b>Generator</b>also writes the full voltage and temperature series into a simulated control-system archive: a source system, not the Record${arc ? ` (${arc.channels} series, ${(arc.samples / 1e3).toFixed(0)}k samples)` : ''}</div><span class="arrow">&#8594;</span>
     ${box('Adapter', 'fetches a series on demand', 'real')}<span class="arrow">&#8594;</span><a class="box real" href="#/timeline"><b>Timeline</b>draws it; nothing is copied</a></div>
-  <div class="key"><span><i class="k-off"></i>dashed: not built</span><span><i class="k-real"></i>blue: runs here</span><span><i class="k-demo"></i>violet: the generator, demo only</span></div>
+  <div class="key"><span><i class="k-off"></i>dashed: not built; click for its interface</span><span><i class="k-real"></i>blue: runs here</span><span><i class="k-demo"></i>violet: the generator, demo only</span></div>
+
+  <h2>How time series are treated</h2>
+  <p><b>The Record keeps what changed, not the samples.</b> A reading's full series stays in the source; the Record gets one entry each time the reading changes status, with a pointer back; anyone who needs the series fetches it from the source.</p>
+  <div class="flow ts">
+    <div class="box src"><b>Source archive</b>every sample, kept by the existing system</div><span class="arrow">&#8594;</span>
+    <div class="box"><b>Status rule</b>normal, drifting, low, high, off</div><span class="arrow">&#8594;</span>
+    <a class="box real" href="#/record"><b>The Record</b>one entry per change, with a pointer</a>
+    <span class="arrow">&#8592;</span><div class="box real"><b>Timeline, agent</b>read the Record</div></div>
+  <div class="flow ts"><div class="box src"><b>Source archive</b></div><span class="arrow">&#8592;</span>
+    <div class="box real"><b>Adapter</b>fetches a series on demand, as of a moment${code('adapter')}</div><span class="arrow">&#8592;</span>
+    <div class="box real"><b>Timeline, agent</b>need the series itself</div></div>
+  <div id="ts-demo"></div>
+  <div class="tablewrap"><table><tr><th>Option for bulk series</th><th>Used?</th><th>Here</th></tr>
+    <tr><td><b>1. Keep series out of the entry table</b></td><td>yes, as a stand-in</td><td>The demo's archive plays the source system, so there is something to fetch.</td></tr>
+    <tr><td><b>2. Record changes, not samples</b></td><td>yes</td><td>The status rule above. What it misses is only in the source.</td></tr>
+    <tr><td><b>3. Fine detail only where it matters</b></td><td>not yet</td><td>A coarse baseline everywhere may be needed for anticipation (Q2), which looks at normal periods.</td></tr>
+    <tr><td><b>4. Fetch from the source on demand</b></td><td>yes</td><td>The adapter; nothing is copied into the Record.</td></tr></table></div>
 
   <div class="genbox">
   <h2>What the generator does in place of the feed</h2>
   <p>It first lays out a calendar of fills and runs and decides where each <a href="#/scenarios">planted situation</a> goes${code('calendar')}. Then it writes the Record through the aggregator${code('write')}. Each row below shows one thing it writes, with a real example.</p>
   <h3>It writes the entries the feed would have produced</h3>
   <div class="tablewrap"><table>${head}
-    ${row('<b>A voltage reading</b>', `Writes the full series (a sample every ${every}) to the archive${code('voltage')}. Scans it with a fixed rule and writes an entry only when the status changes: normal, drifting, low, high, off${code('status_rule', 'rule')}. The entry points back into the archive, which the GUI reads through an adapter${code('adapter', 'adapter')}.`, entryCell(ex.voltage),
-      'The series stays in the control-system archive. The <b>sparsifier</b> records status changes with a pointer; an <b>adapter</b> fetches the series at full resolution when someone needs it.')}
+    ${row('<b>A voltage reading</b>', `Invents the full series, a sample every ${every}, and writes it to the simulated archive${code('voltage')}. Applies a fixed rule to it and writes an entry each time the status changes${code('status_rule', 'rule')}.`, entryCell(ex.voltage),
+      'The series is already in the control-system archive. The <b>sparsifier</b> applies a status rule owned by the subsystem and writes the changes, each with a pointer into the archive.')}
     ${row('<b>Data quality of a run</b>', `Sets five numbers per run and box directly from the planted faults, plus 1% noise. No histogram or plot exists.${code('quality')}`, entryCell(ex.quality),
       'The <b>sparsifier</b> extracts numbers from data-quality histograms; the <b>summarizer</b> could describe a plot in words.')}
     ${row('<b>A logbook note</b>', `Picks one of two or three hand-written sentences per situation and fills in names of parts. There are never people's names.${code('note', 'templates')}`, entryCell(ex.note),
@@ -552,6 +569,53 @@ PAGES.built = async () => {
     <tr><td><b>Complete incidents</b></td><td>Every fault has one</td><td>Only expert-reviewed incidents are this complete</td></tr>
     <tr><td><b>Language models</b></td><td>None used</td><td>The anonymizer and summarizer would use local ones</td></tr>
   </table></div>`;
+  return { html, mount: () => tsIllustration(ex.voltage, d.config.raw_cadence_s) };
+};
+async function tsIllustration(e, cad) {
+  const host = $('#ts-demo');
+  if (!host || !e) return;
+  const t0 = e.t_start - 2 * 3600, t1 = e.t_start + 8 * 3600;
+  const [tl, rec] = await Promise.all([api('timeline', { element: e.element, t0, t1 }),
+    api('entries', { element: e.element, type: e.type, t0, t1, limit: 50 })]);
+  const panel = tl.panels.find((p) => p.type === 'lv_voltage');
+  const status = tl.strip.find((r) => r.row === 'Reading status');
+  const cfg = { t0, t1, width: host.clientWidth, panels: [{ ...panel, label: `${e.element} low voltage, from the source archive`, series: panel.series.filter((x) => x.box === e.element) }],
+    rows: [{ label: 'In the Record', items: rec.entries.map((x) => ({ t0: x.t_start, shape: 'diamond', cls: x.payload.value === 'normal' ? 'mk' : 'mk crit', tip: `${fmt(x.t_start)}\n${x.payload.value} (recorded ${fmt(x.known_at)})`, go: `#/entry/${x.id}` })) },
+      { label: 'Reading status', items: status.items.filter((it) => it.text.startsWith(`${e.element} low voltage`)).map((it) => ({ t0: it.t0, t1: it.t1 ?? null, cls: STATUS_CLS[it.value] || 'warn', tip: it.text, go: `#/entry/${it.id}` })) }],
+    aria: 'one voltage series from the archive, and the few entries the Record keeps for it' };
+  const chart = buildChart(cfg);
+  const samples = Math.round((t1 - t0) / cad);
+  host.innerHTML = `<p class="small muted">A real example from this demo: ${samples.toLocaleString()} samples of one box's voltage over 10 hours, and the ${rec.total} entries the Record keeps for them. Hover a diamond to see when it was recorded.</p>` + chart.svg +
+    `<div class="tablewrap"><table><tr><th>Status from</th><th>Recorded</th><th>Status</th><th>Reading</th><th>Pointer into the source</th></tr>${rec.entries.map((x) =>
+      `<tr class="click" data-go="#/entry/${x.id}"><td class="t">${fmt(x.t_start)}</td><td class="t">${fmt(x.known_at)}</td><td><b>${esc(x.payload.value)}</b></td><td>${x.payload.reading} ${esc(x.payload.unit)}</td><td class="mono small">${esc(x.raw_ref)}</td></tr>`).join('')}</table></div>`;
+}
+
+/* 2b. interfaces of the parts not built ---------------------------------------------- */
+const KIND_LABEL = { contract: 'contract', record: 'data it passes on', implementation: 'implementation', function: 'function' };
+PAGES.interfaces = async () => {
+  const d = await api('interfaces');
+  const groups = [['feed', 'The feed: from existing systems into the Record'], ['aggregator', 'The aggregator'], ['orchestrator', 'The orchestrator: reading the Record to help a crew']];
+  const fieldTable = (fs) => (fs.length ? `<table class="sig"><tr><th>Field</th><th>Type</th><th>Meaning</th></tr>${fs.map((f) => `<tr><td class="mono">${esc(f.name)}</td><td class="mono small">${esc(f.type)}</td><td class="small">${esc(f.note)}</td></tr>`).join('')}</table>` : '');
+  const methodList = (ms, file) => (ms.length ? `<ul class="sigs">${ms.map((m) => `<li><a class="mono" href="/source/${file}#L${m.line}" target="_blank" rel="noopener">${esc(m.signature)}</a>${m.doc ? `<br><span class="small">${esc(m.doc)}</span>` : ''}</li>`).join('')}</ul>` : '');
+  const card = (i) => {
+    const impls = i.items.filter((x) => x.kind === 'implementation' && i.status !== 'built');
+    const main = i.items.filter((x) => !(x.kind === 'implementation' && i.status !== 'built'));
+    return `<div class="card iface" id="if-${i.file.replace(/\W/g, '-')}"><h3 style="margin-top:0">${esc(i.title)} <span class="status${i.status === 'built' ? ' built' : ''}">${i.status === 'built' ? 'built' : 'interface only'}</span>
+      <a class="code" href="/source/${i.file}#L1" target="_blank" rel="noopener">${esc(i.file)}</a></h3>
+      <p>${esc(i.role)}</p>
+      ${i.example && i.example.input ? `<div class="io"><div><b>Takes</b><pre>${esc(i.example.input)}</pre></div><div><b>Gives</b><pre>${esc(i.example.output)}</pre></div></div>` : ''}
+      ${i.produced ? `<p class="small"><b>An entry of the kind it would produce</b>, from this Record (written by the generator):</p><div class="tablewrap"><table><tr>${ENTRY_HEAD}</tr>${entryRows([i.produced])}</table></div>` : ''}
+      ${main.map((x) => `<h4>${esc(x.name)} <span class="muted small">${KIND_LABEL[x.kind]}</span></h4>${x.doc ? `<p class="small">${esc(x.doc)}</p>` : ''}${fieldTable(x.fields)}${methodList(x.methods, i.file)}`).join('')}
+      ${impls.length ? `<h4>Implementations to write</h4><ul class="sigs">${impls.map((x) => `<li><a class="mono" href="/source/${i.file}#L${x.line}" target="_blank" rel="noopener">${esc(x.name)}</a> <span class="small">${esc(x.doc)}</span></li>`).join('')}</ul>` : ''}
+    </div>`;
+  };
+  const html = `<h1>Interfaces of the parts not built yet</h1>
+  <p class="lead">Each part of the design that does not run yet exists as code that fixes its interface: what it takes, what it gives, and the calls it must answer. This page is read from that code, so it cannot drift from it. Every method raises "not implemented".</p>
+  <div class="note">Where a part would produce entries, the card shows one real entry of that kind from this Record. Today the generator writes those entries itself; the interface says what a real part must produce instead.</div>
+  ${groups.map(([g, title]) => `<h2>${title}</h2>${d.interfaces.filter((i) => i.group === g).map(card).join('')}`).join('')}
+  <h2>The detector model</h2>
+  <div class="card iface"><h3 style="margin-top:0">Detector model <span class="status">planned</span></h3>
+    <p>Not yet written as code. The plan is in <span class="mono">docs/DETECTOR_PLAN.md</span>: one interface (the map at a time, the views, the parts, the channels a part covers, translating between views) with the toy detector and cmscoord behind it.</p></div>`;
   return { html };
 };
 

@@ -417,6 +417,84 @@ def _link_example(store: RecordStore, as_of: int, entry_type: str, link_type: st
     return None
 
 
+# The parts of the design that are interfaces only, in the order data flows through them.
+INTERFACE_FILES = [
+    ("Source adapters", "feed", "adapters/base.py"),
+    ("Control-system archive adapter", "feed", "adapters/control_archive.py"),
+    ("Anonymizer", "feed", "anonymizer/__init__.py"),
+    ("Summarizer", "feed", "summarizer/__init__.py"),
+    ("Sparsifier", "feed", "sparsifier/__init__.py"),
+    ("Direct-link builder", "aggregator", "aggregator/linker.py"),
+    ("Query tools", "orchestrator", "orchestrator/tools.py"),
+    ("Diagnosis agent", "orchestrator", "orchestrator/agent.py"),
+]
+
+
+def _describe_module(rel: str) -> dict:
+    """Classes, fields, methods and the module's ROLE/STATUS/EXAMPLE, read from the code itself."""
+    import ast
+
+    path = ROOT / rel
+    text = path.read_text()
+    lines = text.splitlines()
+    tree = ast.parse(text)
+    consts: dict[str, Any] = {}
+    items = []
+
+    def sig(fn: ast.FunctionDef) -> str:
+        args = ast.unparse(fn.args)
+        ret = f" -> {ast.unparse(fn.returns)}" if fn.returns else ""
+        return f"{fn.name}({args}){ret}"
+
+    def doc1(node) -> str:
+        d = ast.get_docstring(node) or ""
+        return d.strip().split("\n\n")[0].replace("\n", " ")
+
+    def comment(lineno: int) -> str:
+        line = lines[lineno - 1]
+        return line.split("#", 1)[1].strip() if "#" in line else ""
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
+                and node.targets[0].id in ("STATUS", "ROLE", "EXAMPLE"):
+            consts[node.targets[0].id] = ast.literal_eval(node.value)
+        elif isinstance(node, ast.ClassDef):
+            bases = [ast.unparse(b) for b in node.bases]
+            decos = [ast.unparse(d) for d in node.decorator_list]
+            kind = "contract" if "Protocol" in bases else "record" if any(d.startswith("dataclass") for d in decos) else "implementation"
+            fields = [{"name": ast.unparse(st.target), "type": ast.unparse(st.annotation), "note": comment(st.lineno)}
+                      for st in node.body if isinstance(st, ast.AnnAssign)]
+            methods = [{"signature": sig(st), "doc": doc1(st), "line": st.lineno}
+                       for st in node.body if isinstance(st, ast.FunctionDef) and not st.name.startswith("_")]
+            items.append({"name": node.name, "kind": kind, "doc": doc1(node), "line": node.lineno,
+                          "fields": fields, "methods": methods})
+        elif isinstance(node, ast.FunctionDef) and not node.name.startswith("_"):
+            items.append({"name": node.name, "kind": "function", "doc": doc1(node), "line": node.lineno,
+                          "fields": [], "methods": [{"signature": sig(node), "doc": "", "line": node.lineno}]})
+    return {"file": rel, "module_doc": (ast.get_docstring(tree) or "").strip(), "items": items, **consts}
+
+
+def interfaces(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """The interfaces of the parts not built yet, read from their skeleton code, each with a real
+    entry from this Record of the kind it would produce."""
+    as_of = _as_of(q)
+    out = []
+    for title, group, rel in INTERFACE_FILES:
+        mod = _describe_module(rel)
+        example = mod.get("EXAMPLE") or {}
+        produced = None
+        if example.get("produces"):
+            src, typ = example["produces"].split("/")
+            found = store.entries(as_of, sources=[src], types=[typ])
+            linked = [e for e in found if store.incidents_of_entry(e.id, as_of)]
+            interesting = [e for e in found if e.payload.get("value") not in (None, "normal", "ok", "on")]
+            pick = (linked or interesting or found or [None])[0]
+            produced = _e(pick) if pick else None
+        out.append({"title": title, "group": group, **mod, "status": mod.get("STATUS", "built"),
+                    "role": mod.get("ROLE", ""), "example": example, "produced": produced})
+    return {"interfaces": out}
+
+
 def _archive_summary(archive) -> Optional[dict]:
     if archive is None:
         return None
@@ -502,7 +580,7 @@ ROUTES: dict[str, Callable[[RecordStore, dict, dict], dict]] = {
     "meta": meta, "next_known": next_known, "overview": overview, "elements": elements,
     "entries": entries, "entry": entry, "incidents": incidents, "incident": incident,
     "timeline": timeline, "tables": tables, "map": detector_map, "diff": diff, "precedents": precedents, "read": read,
-    "replay": replay, "built": built, "demo/planted": demo_planted, "demo/device": demo_device,
+    "replay": replay, "built": built, "interfaces": interfaces, "demo/planted": demo_planted, "demo/device": demo_device,
 }
 # Endpoints that may be called without as_of, and why (see the module docstring).
 NO_AS_OF = {"meta", "next_known", "demo/planted", "demo/device"}

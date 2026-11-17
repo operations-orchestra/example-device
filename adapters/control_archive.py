@@ -25,6 +25,14 @@ from typing import Any, Optional
 
 INDEX = "index.json"
 
+STATUS = "built"
+ROLE = "Fetches a reading's full series from the control-system archive on demand, as of a moment."
+EXAMPLE = {
+    "input": "fetch('HBP02', 'lv_voltage', t0=2040-03-01 00:00, t1=2040-03-01 08:00, as_of=2040-03-01 05:00)",
+    "output": "[{t0, t1, v: mean, lo: min, hi: max, n: samples}, ...] up to 05:00 only; one point per sample when zoomed in",
+    "produces": None,
+}
+
 
 def series_file(element: str, quantity: str) -> str:
     return f"{element}.{quantity}.f32"
