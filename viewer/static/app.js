@@ -1032,14 +1032,16 @@ async function mountAgent(iid, caseFor) {
   const bar = (x) => `<span class="cbar"><span style="width:${pct(x)}"></span><i style="left:${pct(a.settings.new_below)}"></i><i style="left:${pct(a.settings.known_at_least)}"></i></span>`;
   const call = (qid) => log[qid - 1];
   const argText = (c) => Object.entries(c.args).map(([k, v]) => `${k}=${Array.isArray(v) ? '[' + v.join(', ') + ']' : (['t', 't0', 't1', 'before'].includes(k) ? fmt(v) : v)}`).join(', ');
+  const BRAINS = { scripted: ['Scripted brain', 'a fixed procedure, no language model'], model: ['LLM brain', 'a language model calling the same tools'] };
+  const [brainName, brainWhat] = BRAINS[p.brain] || [p.brain, ''];
   host.innerHTML = `<div class="agent-head"><b>What the agent would say at this moment</b>
-      <span class="muted small">${p.brain} brain: a fixed procedure, no language model</span></div>
+      <span class="brain brain-${esc(p.brain)}">${brainName}</span><span class="muted small">${brainWhat}</span></div>
     <div class="io-agent">
       <div class="io-in"><div class="io-label">Input: the question</div>
         <p>"${esc(a.trigger.question)}"</p>
         <dl class="facts small"><dt>Asked at</dt><dd>${tm(a.trigger.as_of)}</dd><dt>Seen on</dt><dd>${elLink(a.trigger.part)}</dd>
           <dt>Symptoms given</dt><dd>${a.trigger.symptom_ids.length} entries on record</dd></dl></div>
-      <div class="io-out"><div class="io-label">Output: the agent's answer ${a.accepted ? '<span class="ok-text">passed the check</span>' : '<span class="bad-text">rejected by the check</span>'}</div>
+      <div class="io-out"><div class="io-label">Output: the ${brainName.toLowerCase()}'s answer ${a.accepted ? '<span class="ok-text">passed the check</span>' : '<span class="bad-text">rejected by the check</span>'}</div>
         <dl class="facts answer">
           <dt>Verdict</dt><dd><span class="verdict ${VERDICT_CLS[p.verdict]}">${p.verdict}</span> ${p.verdict === 'known' ? 'seen before' : p.verdict === 'new' ? 'not seen before' : 'possibly seen before'}</dd>
           <dt>Confidence</dt><dd>${bar(p.confidence)} <b>${pct(p.confidence)}</b> <span class="muted small">known from ${pct(a.settings.known_at_least)}, new below ${pct(a.settings.new_below)}</span></dd>

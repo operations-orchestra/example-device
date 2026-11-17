@@ -200,3 +200,5 @@ table.matrix { width: auto; } table.matrix td, table.matrix th { text-align: cen
 .io-out .bad-text { text-transform: none; letter-spacing: 0; margin-left: 6px; }
 th.sorthead { cursor: pointer; user-select: none; } th.sorthead:hover { color: var(--ink); }
 th.sorthead[data-dir="asc"]::after { content: " ▲"; } th.sorthead[data-dir="desc"]::after { content: " ▼"; }
+.brain { font-size: 12px; font-weight: 700; border-radius: 999px; padding: 2px 10px; color: #fff; }
+.brain-scripted { background: var(--ink2); } .brain-model { background: var(--s7); }
