@@ -286,7 +286,17 @@ interfaces into running code.
 
 ## 7a. Design notes from review
 
-**Sparsification is a key design choice, currently hidden in the generator.** A reading is
+**Time series: decided 17 November 2026.** The Record stores no time series. It records a
+reading only when its status changes (normal, drifting, low, high, off), with a pointer into
+the source; the series stays in the source and is fetched at full resolution on demand.
+This joins the earlier decision that facts stay in their sources (`nsf-ai-datasets/CLAUDE.md`)
+with the proposal's "compact features and pointers". In the demo the generator writes the
+full series to a simulated control-system archive (`out/source/control_archive/`, not the
+Record), applies a fixed status rule (`example_device/readings.py`), and the GUI reads the
+series through `adapters/control_archive.py`. The `tiny` Record went from 2,569 entries to
+289. The text below describes the earlier design and is kept for the record.
+
+**Sparsification is a key design choice, previously hidden in the generator.** A reading is
 stored as four numbers per window (mean, minimum, maximum, slope); the window is 15
 minutes in `tiny` and is widened automatically when a Record would exceed its size
 budget. In production this is the sparsifier's decision. What it costs: anything faster
@@ -314,7 +324,7 @@ raw data for them to consume.
 |---|---|---|
 | **Let an entry or incident name several elements.** Add a table "this entry concerns these elements", each with a role such as affected or suspected. | Every entry and incident names exactly one element today. That was a schema shortcut, not a modelling decision: a real root cause often involves several parts (a box and its supply, or two subsystems). | `aggregator/schema.sql` and the read methods; the detector map and timelines (an entry would appear on every part it names); the "same element" precedent rule (becomes "shares an element"); per-subsystem write rules for entries that span subsystems. Expect sizeable GUI changes. |
 | Entries: more views than the raw table. | Suggested, from low to high level: by type, by element, by run, around a moment, by incident. Awaiting a choice. | `viewer/` only |
-| A working sparsifier fed by a raw series. | Deferred; see 7a. | `example_device/`, a new `sparsifier/` |
+| Status rules per quantity, owned by subsystems; the same treatment for data quality. | The demo's rule is hand-picked and lives in the generator; see 7a. | `example_device/readings.py`, later `sparsifier/` |
 | Incident plots. | See 7a; the project lead will return to it. | schema unchanged |
 
 ## 8. Open questions for the project lead

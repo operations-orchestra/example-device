@@ -31,7 +31,8 @@ def _synth(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     cfg = result["config"]
-    print(f"Wrote {result['db']} ({result['size_mb']} MB of {cfg.max_size_mb} MB allowed)")
+    print(f"Wrote {result['db']} ({result['size_mb']} MB) and the control-system archive "
+          f"{result['archive']} ({result['archive_mb']} MB); {cfg.max_size_mb} MB allowed in total")
     print(f"  preset {cfg.preset}, seed {cfg.seed}: {cfg.days} days, {result['fills']} fills, "
           f"{result['runs']} runs, {cfg.n_boxes} readout boxes, "
           f"{cfg.n_boxes * cfg.channels_per_box} channels")
@@ -76,7 +77,10 @@ def _plot(args: argparse.Namespace) -> int:
               file=sys.stderr)
         return 1
     out = args.out or Path(args.db).parent / f"plot_{args.element}.png"
-    path = plot_element(store, args.element, out,
+    from adapters.control_archive import ControlArchive
+
+    archive = ControlArchive.find(args.db)
+    path = plot_element(store, args.element, out, series=archive.fetch if archive else None,
                         t0=from_iso(args.t_from) if args.t_from else None,
                         t1=from_iso(args.t_to) if args.t_to else None, as_of=_as_of(args))
     print(f"Wrote {path}")

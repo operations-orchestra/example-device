@@ -3,7 +3,7 @@
   --grid: #e1e0d9; --axis: #c3c2b7; --fill: #c3c2b7;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6;
   --critical: #d03b3b; --serious: #ec835a; --good: #0ca30c;
-  --demo: #6250d6; --demo-bg: #efedfb; --accent: #256abf; --llm: #0f7f58; --llm-bg: #e3f5ee;
+  --demo: #6250d6; --demo-bg: #efedfb; --accent: #256abf; --warn: #fab219; --llm: #0f7f58; --llm-bg: #e3f5ee;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -140,3 +140,16 @@ main details { border: 1px solid var(--grid); border-radius: 8px; padding: 2px 1
 a.code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: nowrap; border: 1px solid var(--axis); border-radius: 4px; padding: 0 5px; background: var(--surface); }
 .note ol { margin: 6px 0 2px; padding-left: 22px; } .note li { margin: 4px 0; max-width: 92ch; }
 .note.todo { border-left-color: var(--s4); }
+
+/* entry classes: one colour each, used wherever an entry is listed */
+.cls { display: inline-block; min-width: 26px; text-align: center; font-size: 11px; font-weight: 700; color: #fff; border-radius: 4px; padding: 0 5px; line-height: 17px; }
+.cls-MS { background: var(--s1); } .cls-QA { background: var(--s3); } .cls-HI { background: var(--s2); }
+@media (prefers-color-scheme: dark) { .cls { color: #0d0d0d; } }
+.split { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 900px) { .split { grid-template-columns: 1fr; } }
+.tree-panel { background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; padding: 10px; position: sticky; top: 50px; max-height: calc(100vh - 70px); overflow: auto; }
+.tn { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 5px; cursor: pointer; font-size: 13px; }
+.tn:hover { background: var(--page); } .tn.on { background: var(--grid); font-weight: 600; }
+.tn .tc { margin-left: auto; color: var(--ink2); font-variant-numeric: tabular-nums; } .tn .tk { color: var(--muted); font-size: 11px; }
+.tn.l0 { font-weight: 600; } .tn.l1 { margin-top: 6px; font-weight: 600; } .tn.l2 { padding-left: 22px; color: var(--ink2); } .tn.l3 { padding-left: 38px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+svg .warn { fill: var(--warn); }

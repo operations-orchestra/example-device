@@ -7,10 +7,11 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 ALLOWED = {
     "utils": set(),
+    "adapters": {"utils"},
     "aggregator": {"utils"},
     "example_device": {"utils", "aggregator"},
-    "orchestrator": {"utils", "aggregator"},
-    "viewer": {"utils", "aggregator", "orchestrator"},
+    "orchestrator": {"utils", "aggregator", "adapters"},
+    "viewer": {"utils", "aggregator", "orchestrator", "adapters"},
 }
 OURS = set(ALLOWED) | {"anonymizer", "sparsifier", "summarizer", "adapters"}
 

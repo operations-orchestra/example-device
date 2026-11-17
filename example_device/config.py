@@ -22,7 +22,7 @@ class DeviceConfig:
     channels_per_box: int
     boxes_per_supply: int
     boxes_per_fed: int
-    ms_cadence_s: int          # width of one sparsified machine-state window
+    raw_cadence_s: int         # seconds between samples in the control-system archive (not the Record)
     stop_after_h: float        # the technical stop begins after this many hours
     stop_hours: float
     max_size_mb: float
@@ -42,21 +42,21 @@ class DeviceConfig:
 PRESETS: dict[str, DeviceConfig] = {
     "tiny": DeviceConfig(
         preset="tiny", seed=1, days=3, subdetectors=("HB", "HF"), boxes_per_sub=2,
-        channels_per_box=12, boxes_per_supply=1, boxes_per_fed=2, ms_cadence_s=900,
+        channels_per_box=12, boxes_per_supply=1, boxes_per_fed=2, raw_cadence_s=60,
         stop_after_h=12, stop_hours=10, max_size_mb=2.0,
         n_fed_comm_same=1, n_fed_comm_other=0, n_lv_trip=1, n_hot_channels=1,
         n_planned_change=1, n_sync_loss=0,
     ),
     "small": DeviceConfig(
         preset="small", seed=1, days=30, subdetectors=("HB", "HE", "HF", "HO"), boxes_per_sub=4,
-        channels_per_box=18, boxes_per_supply=2, boxes_per_fed=2, ms_cadence_s=900,
+        channels_per_box=18, boxes_per_supply=2, boxes_per_fed=2, raw_cadence_s=60,
         stop_after_h=228, stop_hours=36, max_size_mb=15.0,
         n_fed_comm_same=3, n_fed_comm_other=1, n_lv_trip=5, n_hot_channels=9,
         n_planned_change=4, n_sync_loss=3,
     ),
     "full": DeviceConfig(
         preset="full", seed=1, days=90, subdetectors=("HB", "HE", "HF", "HO"), boxes_per_sub=9,
-        channels_per_box=24, boxes_per_supply=3, boxes_per_fed=3, ms_cadence_s=300,
+        channels_per_box=24, boxes_per_supply=3, boxes_per_fed=3, raw_cadence_s=120,
         stop_after_h=480, stop_hours=48, max_size_mb=HARD_CAP_MB,
         n_fed_comm_same=6, n_fed_comm_other=4, n_lv_trip=14, n_hot_channels=25,
         n_planned_change=10, n_sync_loss=8,

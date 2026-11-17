@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from aggregator import TABLES, RecordStore, StoredEntry
+from utils import to_iso
 from aggregator.view import scope
 
 from . import precedents as prec
@@ -154,9 +155,9 @@ def incident(store: RecordStore, q: dict, ctx: dict) -> dict:
             "links": list(links.values())}
 
 
-QUANTITIES = [("lv_voltage", "mean", "Low voltage", "V"),
-              ("temperature", "mean", "Temperature", "°C"),
-              ("occupancy_summary", "worst_ls_dead_fraction", "Dead channels (worst lumisection)", "fraction"),
+# Readings come from the source archive through its adapter, never from the Record.
+READINGS = [("lv_voltage", "Low voltage", "V"), ("temperature", "Temperature", "°C")]
+QUANTITIES = [("occupancy_summary", "worst_ls_dead_fraction", "Dead channels (worst lumisection)", "fraction"),
               ("occupancy_summary", "hot_fraction", "Hot channels", "fraction"),
               ("occupancy_summary", "mean_occupancy", "Occupancy", "relative")]
 _FAULT_EVENTS = ("fed_out_of_sync", "data_integrity_errors", "config_change")
@@ -170,7 +171,14 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
     boxes, marks = scope(store, name)
     shown = boxes[:4]
     ls = int(store.meta().get("lumisection_s", 23))
+    span0, span1 = store.time_span()
+    t0, t1 = _int(q, "t0", default=span0), _int(q, "t1", default=span1)
+    archive = ctx.get("archive")
     panels = []
+    for quantity, label, unit in READINGS:
+        series = [{"box": box, "points": archive.fetch(box, quantity, t0, t1, as_of) if archive else []} for box in shown]
+        panels.append({"type": quantity, "key": "v", "label": label, "unit": unit, "per_run": False,
+                       "from_source": True, "series": series})
     for etype, key, label, unit in QUANTITIES:
         series = []
         for box in shown:
@@ -185,7 +193,7 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
     experiment = store.elements("experiment")[0]
     detector_level = {n for n in marks if store.element_kind(n) in ("detector", "experiment")}
     beam = store.entries(as_of, elements=[experiment], types=["beam_mode"])
-    strip = {"Stable beams": [], "Downtime": [], "Certified bad": [], "State change": [],
+    strip = {"Stable beams": [], "Downtime": [], "Certified bad": [], "Reading status": [], "State change": [],
              "Fault event": [], "Logbook note": []}
     for cur, nxt in zip(beam, beam[1:] + [None]):
         if cur.payload["value"] == "STABLE BEAMS":
@@ -201,6 +209,8 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
             for a, b in p["bad_ls"]:
                 strip["Certified bad"].append({"id": e.id, "t0": e.t_start + (a - 1) * ls, "t1": e.t_start + b * ls,
                                                "text": f"run {p['run']} lumisections {a}-{b}: {p['cause']}"})
+        elif e.type.endswith("_status"):
+            continue                                   # drawn below, as intervals
         elif e.kind == "state" and e.type != "beam_mode" and e.t_start > t_first:
             strip["State change"].append({"id": e.id, "t0": e.t_start, "text": f"{e.element} {e.type} = {p.get('value')}"})
         elif e.type in _FAULT_EVENTS or (e.type == "configure" and p.get("result") == "failed"):
@@ -210,11 +220,19 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
             routine = e.element in detector_level and not store.incidents_of_entry(e.id, as_of)
             strip["Logbook note"].append({"id": e.id, "t0": e.t_start, "routine": routine,
                                           "text": f"{p.get('author_role', '')}: {p.get('text', '')}"})
-    t0, t1 = store.time_span()
+    # reading status: one bar per stretch in which a shown box's reading was not normal
+    for box in shown:
+        for quantity, label, _ in READINGS:
+            changes = store.entries(as_of, elements=[box], types=[f"{quantity}_status"])
+            for cur, nxt in zip(changes, changes[1:] + [None]):
+                if cur.payload["value"] != "normal":
+                    strip["Reading status"].append({
+                        "id": cur.id, "t0": cur.t_start, "t1": nxt.t_start if nxt else None, "value": cur.payload["value"],
+                        "text": f"{box} {label.lower()}: {cur.payload['value']} (recorded {to_iso(cur.known_at)})"})
     return {"element": name, "kind": store.element_kind(name), "boxes": shown, "n_boxes": len(boxes),
             "marks": marks, "panels": panels, "strip": [{"row": k, "items": v} for k, v in strip.items()],
             "incidents": [asdict(i) for i in store.incidents(as_of, elements=marks)],
-            "t0": t0, "t1": t1}
+            "t0": span0, "t1": span1, "range": [t0, t1], "archive": bool(archive)}
 
 
 def tables(store: RecordStore, q: dict, ctx: dict) -> dict:
@@ -361,7 +379,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # so the links keep pointing at the right place as the code changes.
 SOURCE_SPOTS = {
     "calendar": ("example_device/plan.py", "def build_plan("),
-    "voltage": ("example_device/generator.py", "# sparsified machine state: one summary per box per window"),
+    "voltage": ("example_device/generator.py", "# readings: the full series go to the control-system archive"),
+    "status_rule": ("example_device/readings.py", "RULES = {"),
+    "adapter": ("adapters/control_archive.py", "    def fetch("),
     "quality": ("example_device/generator.py", "# data-quality summary per run and box; certification per run and subdetector"),
     "note": ("example_device/texts.py", "T: dict[str, list[str]] = {"),
     "direct_link": ("example_device/generator.py", "def downtime("),
@@ -391,13 +411,22 @@ def _link_example(store: RecordStore, as_of: int, entry_type: str, link_type: st
     return None
 
 
+def _archive_summary(archive) -> Optional[dict]:
+    if archive is None:
+        return None
+    chans = archive.channels()
+    return {"channels": len(chans), "samples": sum(c["n"] for c in chans),
+            "cadence_s": chans[0]["cadence_s"] if chans else None,
+            "bytes": sum((archive.dir / c["file"]).stat().st_size for c in chans)}
+
+
 def built(store: RecordStore, q: dict, ctx: dict) -> dict:
     """Real rows used as worked examples on the 'how the Record is built' page."""
     as_of = _as_of(q)
     config = json.loads(store.meta().get("config", "{}"))
-    volts = store.entries(as_of, types=["lv_voltage"])
-    steady = [e for e in volts if e.payload["min"] > 7]          # a window in which the supply stayed on
-    voltage = min(steady, key=lambda e: e.payload["mean"]) if steady else (volts[0] if volts else None)
+    volts = store.entries(as_of, types=["lv_voltage_status"])
+    voltage = next((e for e in volts if e.payload["value"] == "drifting down"),
+                   next((e for e in volts if e.payload["value"] != "normal"), volts[0] if volts else None))
     quality = store.entries(as_of, types=["occupancy_summary"])
     hot = next((e for e in quality if e.payload["hot_fraction"] > 0), quality[0] if quality else None)
     notes = store.entries(as_of, types=["shift_note"])
@@ -417,6 +446,9 @@ def built(store: RecordStore, q: dict, ctx: dict) -> dict:
             "examples": {"voltage": _e(voltage) if voltage else None, "quality": _e(hot) if hot else None,
                          "note": _e(note) if note else None},
             "incident_example": example, "source": source_spots(),
+            "archive": _archive_summary(ctx.get("archive")),
+            "share": {"status": sum(n for _, _, t, _, n in by_type if t.endswith("_status")),
+                      "total": sum(n for *_, n in by_type)},
             "links": {"direct": _link_example(store, as_of, "downtime", "direct"),
                       "indirect": _link_example(store, as_of, "root_cause", "indirect")}}
 

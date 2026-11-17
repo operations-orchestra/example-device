@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urlparse
 
+from adapters.control_archive import ControlArchive
 from aggregator import RecordStore
 
 import html
@@ -30,7 +31,7 @@ def handle_api(db_path: Path, planted: Optional[Path], route: str, query: dict[s
         return 400, {"error": "missing required parameter 'as_of': every read names a moment"}
     store = RecordStore.open(db_path)
     try:
-        return 200, func(store, query, {"planted": planted})
+        return 200, func(store, query, {"planted": planted, "archive": ControlArchive.find(db_path)})
     except ApiError as exc:
         return exc.status, {"error": str(exc)}
     except KeyError as exc:
@@ -39,7 +40,7 @@ def handle_api(db_path: Path, planted: Optional[Path], route: str, query: dict[s
         store.close()
 
 
-SOURCE_DIRS = ("example_device", "aggregator", "utils", "viewer")
+SOURCE_DIRS = ("example_device", "aggregator", "utils", "viewer", "adapters")
 
 
 def source_page(rel: str) -> Optional[bytes]:

@@ -51,6 +51,7 @@ times or a frame, never later content.
 | **Three incident labels kept apart**, each with its own known-at: recovery action, confirmed cause, certification. Status is derived, not stored. | What restored running is not why it happened, and the two are learned days or weeks apart. Many problems never get a cause. | More columns than a single "resolution" field. |
 | **One common envelope, free-form payload.** Source, class, kind, type, element, times, pointer, producer are fixed; the payload is whatever the source gives. | Normalize the envelope, never the payload: a new source needs no schema change. | Nothing checks a payload's shape; see "Next steps". |
 | **Four kinds of entry**: state (holds until the next change), point (an instant), report (a statement about an interval), feature (a summary of bulk data over a window). | Sources mean different things by a timestamp. `state_at` must look back to the last change however old, or a quiet supply looks like missing data. | `feature` was added during the build and was not in the agreed design. |
+| **No time series in the Record.** A reading is recorded only when its status changes (normal, drifting, low, high, off), as a state entry pointing into the source archive. The series itself is fetched from the source on demand (`adapters/control_archive.py`). | Storing windows grew as parts × quantities × windows: 90% of all entries. Averaging in advance cannot be undone; the source keeps full resolution. Decided by the project lead, 17 November 2026. | What the Record says about a reading depends on the status rule. Anything the rule misses is only in the source. |
 | **Service relations as their own table.** | A fault in a supply shows up in every box it powers. One parent pointer cannot say that. | Two kinds of neighbour to follow instead of one. |
 | **SQLite for now, all SQL in `store.py`.** | One file, no server, easy to hand to co-PIs. Confining SQL to one module makes a move to PostgreSQL a rewrite of one file. | No write roles, no range types, no concurrent writers (see below). |
 | **Opened read-only by default.** | The GUI and the agent must not be able to change the Record. | Writers must ask for write access explicitly. |
@@ -62,9 +63,10 @@ times or a frame, never later content.
 - **Entry types are free strings.** There are 19 in the `tiny` Record and 20 in `small`,
   because that is what the generator writes. Nothing lists them, defines them, or says
   which class and kind each belongs to; the class is repeated on every row.
-- **Sparsified time series dominate.** In `tiny`, 2,304 of 2,569 entries (90%) are voltage
-  and temperature window summaries; in `small`, 23,040 of 28,012 (82%). This grows as
-  parts × quantities × windows and will not scale to a real detector.
+- **Status changes depend on a hand-picked rule** (`example_device/readings.py`): a band
+  around the setpoint, a slope threshold, and a 10-minute hold. Before 17 November the Record
+  stored window summaries instead, 90% of all entries in `tiny`; it now stores 24 status
+  entries there (8%), and 112 of 5,084 in `small`.
 - **The producer writes the links.** In the proposal the aggregator builds direct links
   itself from shared identifiers and times. Here the generator writes them.
 - **No write roles.** The proposal's per-subsystem write access (Sec. 3.2) is not modelled.
@@ -81,11 +83,8 @@ In rough order of how much else depends on them:
 2. **A catalogue of entry types**: one row per (source, type) with its class, kind, unit,
    meaning, expected payload fields and owning subsystem. The class moves off each entry.
    New types are registered, not invented; the GUI can group and colour by it.
-3. **Take bulk time series out of the entry table**: keep them in a separate series store
-   (a table or columnar files) addressed by element, quantity and window, and let the
-   Record hold only what something can be said about: state changes, excursions, and a
-   pointer to the series. To be decided with the sparsifier design; see
-   `docs/DESIGN.md` 7a.
+3. **Status rules per quantity, owned by the subsystem**, instead of one hand-picked rule
+   in the generator; and the same treatment for the other bulk source, data quality.
 4. **Build direct links in the aggregator**, not in producers.
 5. **Plots attached to incidents**: an entry holding a pointer to an image, in practice
    mostly logbook attachments (`docs/DESIGN.md` 7a).

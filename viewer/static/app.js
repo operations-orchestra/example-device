@@ -32,7 +32,7 @@ async function api(route, params = {}, withAsOf = true) {
 function describe(e) {
   const p = e.payload || {};
   if (p.text) return `${p.author_role || '?'}: ${p.text}`;
-  if (e.type === 'lv_voltage' || e.type === 'temperature') return `mean ${p.mean} ${p.unit}, min ${p.min}, max ${p.max}, slope ${p.slope_per_h}/h`;
+  if (e.type.endsWith('_status')) return `${e.type.replace('_status', '').replace('_', ' ')} ${p.value} (reading ${p.reading} ${p.unit}, setpoint ${p.reference})`;
   if (e.type === 'downtime') return `${Math.floor(p.duration_s / 60)} min, ${p.lost_lumi_pb} /pb lost, ${p.category}: ${p.details}`;
   return Object.entries(p).map(([k, v]) => `${k}=${Array.isArray(v) ? JSON.stringify(v) : v}`).join(', ');
 }
@@ -41,12 +41,14 @@ const empty = () => `<span class="unknown">${S.replay ? 'not known yet' : 'none 
 const entryLink = (id) => `<a href="#/entry/${id}">${id}</a>`;
 const elLink = (name) => `<a href="#/timeline/${encodeURIComponent(name)}">${esc(name)}</a>`;
 const incLink = (id, title) => `<a href="#/incident/${id}">#${id}${title ? ' ' + esc(title) : ''}</a>`;
+const CLASS_NAME = { MS: 'Machine state', QA: 'Quality assurance', HI: 'Human interpretation' };
+const clsTag = (c) => `<span class="cls cls-${c}" title="${CLASS_NAME[c] || c}">${c}</span>`;
 const statusCell = (s) => `<span class="status">${s}</span>`;
 const ENTRY_HEAD = '<th>Happened</th><th>Known to the Record</th><th class="num">id</th><th>Class</th><th>Source / type</th><th>Element</th><th>What</th>';
 function entryRows(entries, extra) {
   return entries.map((e) => `<tr class="click" data-go="#/entry/${e.id}">
     ${extra ? extra(e) : ''}<td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td>
-    <td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td>
+    <td class="num">${e.id}</td><td>${clsTag(e.record_class)}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td>
     <td class="what">${esc(describe(e))}</td></tr>`).join('');
 }
 
@@ -270,7 +272,8 @@ const hideTip = () => { $('#tip').hidden = true; };
 
 
 /* --------------------------------------------------------- detector map */
-const NORMAL = new Set(['on', 'ok', 'STABLE BEAMS', 'NO BEAM', 'TECHNICAL STOP']);
+const NORMAL = new Set(['on', 'ok', 'normal', 'STABLE BEAMS', 'NO BEAM', 'TECHNICAL STOP']);
+const stateName = (k) => k.replace('_status', '').replace(/_/g, ' ');
 function mapSvg(d, width) {
   const W = Math.max(760, width), SW = 170, FW = 170, SX = 16, FX = W - FW - 16, BX = SX + SW + 70, BW = FX - 70 - BX, RH = 50, GAP = 10;
   const by = Object.fromEntries(d.elements.map((e) => [e.name, e]));
@@ -288,7 +291,7 @@ function mapSvg(d, width) {
     let g = `<g class="hit" data-go="#/timeline/${encodeURIComponent(e.name)}" data-tip="${esc(tip)}">
       <rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="6" class="node${bad ? ' bad' : ''}"/>
       <text class="title" x="${x + 10}" y="${yy + 18}">${esc(e.name)}</text>
-      <text x="${x + 10}" y="${yy + 34}">${st.length ? st.map(([k, v]) => `${k.replace(/_/g, ' ')}: ${v.value}`).join(' · ') : ''}</text>${extra || ''}</g>`;
+      <text x="${x + 10}" y="${yy + 34}">${st.length ? st.map(([k, v]) => `${stateName(k)}: ${v.value}`).join(' · ') : ''}</text>${extra || ''}</g>`;
     (issues[e.name] || []).forEach((i, k) => {
       g += `<text class="hit issue" x="${x + w - 8}" y="${yy + 18 + 14 * k}" text-anchor="end" data-go="#/incident/${i.id}" data-tip="${esc(i.title + ' (' + i.status + ')')}">open issue #${i.id}</text>`;
     });
@@ -461,7 +464,7 @@ PAGES.detector = async () => {
   <h2>The parts</h2>
   <div class="tablewrap"><table><tr><th>Kind</th><th class="num">How many</th><th>What it is</th></tr>
     <tr><td>subdetector</td><td class="num">${n('subdetector')}</td><td>A section of the calorimeter (HB, HE, HF, HO). Certification is given per subdetector.</td></tr>
-    <tr><td>readout box</td><td class="num">${n('readout_box')}</td><td>On-detector electronics for a group of channels. Voltage, temperature and data-quality numbers are recorded per box.</td></tr>
+    <tr><td>readout box</td><td class="num">${n('readout_box')}</td><td>On-detector electronics for a group of channels. Voltage and temperature are measured per box; the Record keeps their status changes, the full series stay in the source archive.</td></tr>
     <tr><td>channel</td><td class="num">${n('channel')}</td><td>One readout channel. Only flagged when it misbehaves.</td></tr>
     <tr><td>low-voltage supply</td><td class="num">${n('lv_supply')}</td><td>Powers one or more boxes. Has a state: on, off or tripped.</td></tr>
     <tr><td>FED</td><td class="num">${n('fed')}</td><td>Back-end board that reads out one or more boxes.</td></tr></table></div>
@@ -475,7 +478,8 @@ PAGES.detector = async () => {
 /* 2. how the Record is built --------------------------------------------------------- */
 PAGES.built = async () => {
   const d = await api('built');
-  const ex = d.examples, win = d.config.ms_cadence_s / 60, src = d.source;
+  const ex = d.examples, src = d.source, arc = d.archive;
+  const cad = d.config.raw_cadence_s, every = cad >= 60 ? `${cad / 60} minute${cad === 60 ? '' : 's'}` : `${cad} s`;
   const box = (name, what, state) => `<div class="box ${state}"><b>${name}</b>${what}</div>`;
   const code = (key, label) => (src[key] ? ` <a class="code" href="${src[key].href}" target="_blank" rel="noopener">${label || 'code'}: ${esc(src[key].file)}:${src[key].line}</a>` : '');
   const entryCell = (e) => (e ? `<span class="mono small">entry ${entryLink(e.id)} · ${esc(e.source)}/${esc(e.type)} · ${esc(e.element)}<br>${esc(JSON.stringify(e.payload))}</span>` : 'none in this Record');
@@ -498,6 +502,8 @@ PAGES.built = async () => {
   <div class="pathlabel">In this demo</div>
   <div class="flow"><div class="box demo" style="flex:4 1 560px"><b>Generator</b>invents a calendar, plants fault situations, writes everything</div><span class="arrow">&#8594;</span>
     ${box('Aggregator', 'the same code', 'real')}<span class="arrow">&#8594;</span><a class="box real" href="#/tables"><b>The Record</b>the same database</a></div>
+  <div class="flow"><div class="box demo" style="flex:4 1 560px"><b>Generator</b>also writes the full voltage and temperature series into a simulated control-system archive: a source system, not the Record${arc ? ` (${arc.channels} series, ${(arc.samples / 1e3).toFixed(0)}k samples)` : ''}</div><span class="arrow">&#8594;</span>
+    ${box('Adapter', 'fetches a series on demand', 'real')}<span class="arrow">&#8594;</span><a class="box real" href="#/timeline"><b>Timeline</b>draws it; nothing is copied</a></div>
   <div class="key"><span><i class="k-off"></i>dashed: not built</span><span><i class="k-real"></i>blue: runs here</span><span><i class="k-demo"></i>violet: the generator, demo only</span></div>
 
   <div class="genbox">
@@ -505,8 +511,8 @@ PAGES.built = async () => {
   <p>It first lays out a calendar of fills and runs and decides where each <a href="#/scenarios">planted situation</a> goes${code('calendar')}. Then it writes the Record through the aggregator${code('write')}. Each row below shows one thing it writes, with a real example.</p>
   <h3>It writes the entries the feed would have produced</h3>
   <div class="tablewrap"><table>${head}
-    ${row('<b>A voltage reading</b>', `Computes five simulated samples per ${win}-minute window from a formula with noise, keeps four numbers and discards the samples. There is no raw series.${code('voltage')}`, entryCell(ex.voltage),
-      'The <b>sparsifier</b> reduces the control system\'s raw series to a few numbers per window and a pointer to the raw data.')}
+    ${row('<b>A voltage reading</b>', `Writes the full series (a sample every ${every}) to the archive${code('voltage')}. Scans it with a fixed rule and writes an entry only when the status changes: normal, drifting, low, high, off${code('status_rule', 'rule')}. The entry points back into the archive, which the GUI reads through an adapter${code('adapter', 'adapter')}.`, entryCell(ex.voltage),
+      'The series stays in the control-system archive. The <b>sparsifier</b> records status changes with a pointer; an <b>adapter</b> fetches the series at full resolution when someone needs it.')}
     ${row('<b>Data quality of a run</b>', `Sets five numbers per run and box directly from the planted faults, plus 1% noise. No histogram or plot exists.${code('quality')}`, entryCell(ex.quality),
       'The <b>sparsifier</b> extracts numbers from data-quality histograms; the <b>summarizer</b> could describe a plot in words.')}
     ${row('<b>A logbook note</b>', `Picks one of two or three hand-written sentences per situation and fills in names of parts. There are never people's names.${code('note', 'templates')}`, entryCell(ex.note),
@@ -527,10 +533,11 @@ PAGES.built = async () => {
   <h2>Choices the generator makes on the feed's behalf</h2>
   <p>Each row is a real design decision that is <b>not settled</b>. The demo fixes it silently; this table is here so nobody mistakes it for decided. Details are in docs/DESIGN.md, section 7a.</p>
   <div class="tablewrap"><table><tr><th>Choice</th><th>In the demo</th><th>What it hides</th></tr>
-    <tr><td><b>Sparsifying readings</b></td><td>${win}-minute windows: mean, min, max, slope</td><td>Anything faster than a window; a size limit sets the window</td></tr>
+    <tr><td><b>Which reading changes are recorded</b></td><td>A fixed rule: compared with the setpoint, low or high beyond a band, drifting beyond a slope, must hold 10 minutes</td><td>The thresholds are hand-picked. A change the rule misses is only in the archive, not in the Record; a change is recorded 10 minutes late</td></tr>
     <tr><td><b>Summarizing data quality</b></td><td>Five numbers per run and box</td><td>Short problems are diluted; position is lost</td></tr>
     <tr><td><b>Plots</b></td><td>None</td><td>Intended: keep an incident's relevant plots, mostly logbook attachments</td></tr>
     <tr><td><b>When quality data arrive</b></td><td>Ten minutes after the run</td><td>Online plots are visible during a run</td></tr>
+    <tr><td><b>The source archive</b></td><td>Evenly spaced samples, kept for ever, read instantly</td><td>Real archives store on change, may expire, and can be slow or unreachable</td></tr>
     <tr><td><b>Logbook text</b></td><td>One templated sentence</td><td>Real notes are long and irregular; matching is harder</td></tr>
     <tr><td><b>Which part a record is about</b></td><td>Exactly one part, known to the generator</td><td>Must be read from free text; a cause often involves several parts</td></tr>
     <tr><td><b>How late knowledge arrives</b></td><td>Fixed delays</td><td>Real delays vary; many causes are never written</td></tr>
@@ -575,20 +582,33 @@ PAGES.record = async () => {
   const o = await api('overview');
   const params = { limit: 100, offset: RF.offset, order: RF.order };
   if (RF.cls) params.class = RF.cls; if (RF.source) params.source = RF.source; if (RF.type) params.type = RF.type;
-  if (RF.kind) params.kind = RF.kind; if (RF.q) params.q = RF.q;
+  if (RF.q) params.q = RF.q;
   if (RF.element) { params.element = RF.element; if (RF.below) params.below = 1; }
   const d = await api('entries', params);
-  const uniq = (i) => [...new Set(o.entries_by_type.map((r) => r[i]))].sort();
-  const sel = (key, label, values) => `<label>${label} <select data-rf="${key}"><option value="">all</option>${values.map((v) => `<option${RF[key] === v ? ' selected' : ''}>${esc(v)}</option>`).join('')}</select></label>`;
-  const names = { MS: 'machine state', QA: 'quality', HI: 'human' };
+  // class -> source -> type, with counts
+  const tree = {};
+  for (const [c, src, t, k, n] of o.entries_by_type) {
+    tree[c] = tree[c] || { n: 0, sources: {} };
+    tree[c].n += n;
+    const sn = (tree[c].sources[src] = tree[c].sources[src] || { n: 0, types: [] });
+    sn.n += n; sn.types.push([t, k, n]);
+  }
+  const on = (c, src, t) => RF.cls === c && (RF.source || '') === (src || '') && (RF.type || '') === (t || '');
+  const node = (label, n, filter, level, active, extra = '') => `<div class="tn l${level}${active ? ' on' : ''}" data-pick='${JSON.stringify(filter)}'>${label}<span class="tc">${n}</span>${extra}</div>`;
+  const treeHtml = node('All entries', o.n_entries, {}, 0, !RF.cls && !RF.source && !RF.type) + ['MS', 'QA', 'HI'].filter((c) => tree[c]).map((c) => {
+    const open = RF.cls === c || !RF.cls;
+    return node(`${clsTag(c)} ${CLASS_NAME[c]}`, tree[c].n, { cls: c }, 1, on(c)) + (open ? Object.entries(tree[c].sources).sort((a, b) => b[1].n - a[1].n).map(([src, sn]) =>
+      node(esc(src), sn.n, { cls: c, source: src }, 2, on(c, src)) + sn.types.sort((a, b) => b[2] - a[2]).map(([t, k, n]) =>
+        node(esc(t), n, { cls: c, source: src, type: t }, 3, on(c, src, t), `<span class="tk">${k}</span>`)).join('')).join('') : '');
+  }).join('');
   const html = `<h1>What is in the Record: entries</h1>
-  <p class="lead">Every reading summary, event, note and flag is one entry. Click a row for the full entry.</p>
-  <details><summary>What kinds of entry there are (${o.entries_by_type.length} types, ${o.n_entries} entries)</summary>
-  <div class="tablewrap"><table><tr><th>Class</th><th>Source</th><th>Type</th><th>Kind</th><th class="num">Entries</th></tr>
-  ${o.entries_by_type.map(([c, s, t, k, n]) => `<tr class="click" data-filter='${JSON.stringify({ cls: c, source: s, type: t })}'><td>${c} <span class="muted">${names[c]}</span></td><td>${esc(s)}</td><td>${esc(t)}</td><td>${k}</td><td class="num">${n}</td></tr>`).join('')}</table></div></details>
+  <p class="lead">Every event, status change, note and flag is one entry. Pick a branch on the left to narrow the list; click a row for the full entry.</p>
+  <div class="split"><aside class="tree-panel">
+    <div class="small muted">Class, then source, then type. ${o.entries_by_type.length} types.</div>${treeHtml}
+    <p class="small muted">Classes: ${clsTag('MS')} readings and events from online systems, ${clsTag('QA')} data-quality results, ${clsTag('HI')} what people wrote or decided.</p></aside>
+  <div class="split-main">
   <div class="filters">
-    ${sel('cls', 'Class', uniq(0))}${sel('source', 'Source', uniq(1))}${sel('type', 'Type', uniq(2))}${sel('kind', 'Kind', uniq(3))}
-    ${sel('element', 'Element', S.elements.map((e) => e.name))}
+    <label>Element <select data-rf="element"><option value="">all</option>${S.elements.map((e) => `<option${RF.element === e.name ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></label>
     <label><input type="checkbox" data-rf="below"${RF.below ? ' checked' : ''}> and everything below it</label>
     <label>Text <input type="text" data-rf="q" value="${esc(RF.q)}" placeholder="search the content"></label>
     <label>Order <select data-rf="order"><option value="oldest"${RF.order === 'oldest' ? ' selected' : ''}>oldest first</option><option value="newest"${RF.order === 'newest' ? ' selected' : ''}>newest first</option></select></label>
@@ -596,12 +616,12 @@ PAGES.record = async () => {
   </div>
   <div class="pager"><b>${d.total}</b> entries match. Showing ${d.total ? RF.offset + 1 : 0} to ${RF.offset + d.entries.length}.
     <button data-rf-page="-100"${RF.offset ? '' : ' disabled'}>&#9664; previous</button><button data-rf-page="100"${RF.offset + 100 < d.total ? '' : ' disabled'}>next &#9654;</button></div>
-  <div class="tablewrap"><table><tr>${ENTRY_HEAD}</tr>${entryRows(d.entries)}</table></div>`;
+  <div class="tablewrap"><table><tr>${ENTRY_HEAD}</tr>${entryRows(d.entries)}</table></div></div></div>`;
   return { html, mount() {
     document.querySelectorAll('[data-rf]').forEach((el) => el.addEventListener('change', () => { RF[el.dataset.rf] = el.type === 'checkbox' ? el.checked : el.value; RF.offset = 0; render(); }));
-    $('[data-rf-clear]').addEventListener('click', () => { Object.assign(RF, { cls: '', source: '', type: '', kind: '', element: '', below: false, q: '', offset: 0 }); render(); });
+    $('[data-rf-clear]').addEventListener('click', () => { Object.assign(RF, { cls: '', source: '', type: '', element: '', below: false, q: '', offset: 0 }); render(); });
     document.querySelectorAll('[data-rf-page]').forEach((b) => b.addEventListener('click', () => { RF.offset = Math.max(0, RF.offset + (+b.dataset.rfPage)); render(); }));
-    document.querySelectorAll('[data-filter]').forEach((r) => r.addEventListener('click', () => { Object.assign(RF, { cls: '', source: '', type: '', kind: '', element: '', q: '', offset: 0 }, JSON.parse(r.dataset.filter)); render(); }));
+    document.querySelectorAll('[data-pick]').forEach((r) => r.addEventListener('click', () => { Object.assign(RF, { cls: '', source: '', type: '', offset: 0 }, JSON.parse(r.dataset.pick)); render(); }));
   } };
 };
 
@@ -701,7 +721,8 @@ PAGES.timeline = async (parts) => {
   ${d.boxes.length > 1 ? `<div class="key">${d.boxes.map((b, k) => `<span><i class="c${k + 1}"></i>${esc(b)}</span>`).join('')}</div>` : ''}
   <div id="tl"></div>
   <details open><summary>How to read this</summary>
-  <ul><li><b>Each point is one entry.</b> A voltage or temperature point summarizes one window: the line is the mean, and the light band (shown for a single box) is the minimum to maximum within that window. The band is not an uncertainty. <a href="#/built">Why only a few numbers per window.</a></li>
+  <ul><li><b>Voltage and temperature are not stored in the Record.</b> They are fetched from the source archive for the range in view. Zoomed out, each drawn point averages many samples and the light band (shown for a single box) is their minimum to maximum; zoom in far enough and every sample is drawn. <a href="#/built">Why the Record does not keep them.</a></li>
+  <li><b>Reading status</b> is what the Record keeps instead: one entry each time a box's reading changes status (drifting, low, high, off, back to normal). Each bar runs from one change to the next.</li>
   <li>Dead channels, hot channels and occupancy are one entry per run, drawn as a flat segment across the run.</li>
   <li>The rows at the bottom are other entries: downtime, certified-bad ranges, state changes, fault events and logbook notes. Hover to read one, click to open it. Dashed lines are incidents.</li>
   <li>Drag across the chart to zoom into a time range; double-click to see everything. "Typical range" ignores the most extreme 5% at each end, so a small drift stays visible next to a trip to zero.</li></ul></details>`;
@@ -722,22 +743,35 @@ PAGES.timeline = async (parts) => {
   } };
 };
 /* Draws the readings-and-records chart into a host. Used by the Timeline page and by Replay. */
+const STATUS_CLS = { 'drifting down': 'warn', 'drifting up': 'warn', low: 'bad', high: 'bad', off: 'down' };
 function mountTimeline(host, d, view, name) {
-  const rows = d.strip.map((r) => ({ label: r.row, items: r.items.map((it) => ({
-    t0: it.t0, ...(r.row === 'Stable beams' || r.row === 'Downtime' || r.row === 'Certified bad' ? { t1: it.t1 ?? null } : {}),
-    cls: { 'Stable beams': 'beam', Downtime: 'down', 'Certified bad': 'bad', 'State change': 'mk', 'Fault event': it.planned ? 'mk' : 'mk crit', 'Logbook note': it.routine ? 'note routine' : 'note' }[r.row],
+  const rowsOf = (dd) => dd.strip.map((r) => ({ label: r.row, items: r.items.map((it) => ({
+    t0: it.t0, ...(['Stable beams', 'Downtime', 'Certified bad', 'Reading status'].includes(r.row) ? { t1: it.t1 ?? null } : {}),
+    cls: { 'Stable beams': 'beam', Downtime: 'down', 'Certified bad': 'bad', 'Reading status': STATUS_CLS[it.value] || 'warn', 'State change': 'mk', 'Fault event': it.planned ? 'mk' : 'mk crit', 'Logbook note': it.routine ? 'note routine' : 'note' }[r.row],
     shape: { 'State change': 'diamond', 'Fault event': 'tri', 'Logbook note': 'tick' }[r.row],
     tip: `${fmt(it.t0)}\n${it.text}`, go: `#/entry/${it.id}` })) }));
+  let cur = d, token = 0;
   const draw = () => {
-    const cfg = { t0: view.t0, t1: view.t1, width: host.clientWidth, typical: view.typical, panels: d.panels, rows,
-      vlines: d.incidents.map((i) => ({ t: i.t_start, cls: 'inc', label: `#${i.id}`, tip: `${i.title} (${i.status})`, go: `#/incident/${i.id}` })).concat(S.replay ? [{ t: S.asOf, cls: 'asof' }] : []),
+    const panels = cur.panels.map((p) => (p.from_source ? { ...p, label: `${p.label}, from the source archive` } : p));
+    const cfg = { t0: view.t0, t1: view.t1, width: host.clientWidth, typical: view.typical, panels, rows: rowsOf(cur),
+      vlines: cur.incidents.map((i) => ({ t: i.t_start, cls: 'inc', label: `#${i.id}`, tip: `${i.title} (${i.status})`, go: `#/incident/${i.id}` })).concat(S.replay ? [{ t: S.asOf, cls: 'asof' }] : []),
       aria: `readings and recorded events for ${name}` };
     const chart = buildChart(cfg);
     host.innerHTML = chart.svg;
-    wireChart(host, chart, cfg, { zoom: (a, b) => { view.t0 = a; view.t1 = b; draw(); }, reset: () => { view.t0 = d.t0; view.t1 = d.t1; draw(); } });
+    wireChart(host, chart, cfg, { zoom: (a, b) => go(a, b), reset: () => go(d.t0, d.t1) });
   };
-  draw();
-  return draw;
+  // Readings are fetched from the source for the range in view, so zooming in reaches full resolution.
+  const go = async (a, b) => {
+    view.t0 = a; view.t1 = b;
+    const my = ++token;
+    const pad = Math.round((b - a) * 0.05);
+    const fresh = await api('timeline', { element: name, t0: a - pad, t1: b + pad });
+    if (my !== token) return;
+    cur = fresh; draw();
+  };
+  if (d.range && (d.range[0] > view.t0 || d.range[1] < view.t1 || d.range[1] - d.range[0] > 3 * (view.t1 - view.t0))) go(view.t0, view.t1);
+  else draw();
+  return () => go(view.t0, view.t1);
 }
 
 /* 4. scenarios in this demo ---------------------------------------------------------- */
@@ -891,7 +925,7 @@ const READS = {
   subtree: ['An element and everything below it.', ['element']],
   ancestors: ['Everything above an element.', ['element']],
 };
-const HINT = { elements: 'HFP02,HF', types: 'lv_voltage', kinds: 'state,point', record_classes: 'MS,QA,HI', sources: 'dcs,elog', text: 'configure', t0: 'time', t1: 'time', t: 'time', limit: '50', element: 'HFP02', type: 'control_link', incident_id: '3', entry_id: '28' };
+const HINT = { elements: 'HFP02,HF', types: 'lv_voltage_status', kinds: 'state,point', record_classes: 'MS,QA,HI', sources: 'dcs,elog', text: 'configure', t0: 'time', t1: 'time', t: 'time', limit: '50', element: 'HFP02', type: 'control_link', incident_id: '3', entry_id: '28' };
 const RA = { method: 'state_at', values: {}, out: null };
 PAGES.api = async () => {
   const [doc, args] = READS[RA.method];

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import shutil
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Optional
@@ -22,7 +23,7 @@ from typing import Any, Optional
 from aggregator import RecordStore
 from utils import DAY, HOUR, MINUTE, Entry, to_iso
 
-from . import texts
+from . import readings, texts
 from .config import HARD_CAP_MB, LUMISECTION_S, DeviceConfig
 from .model import DETECTOR, EXPERIMENT, DeviceModel, build_model, write_model
 from .plan import (BOX_SYNC_LOSS, CONFIGURE_FAILURE, FED_COMM_LOSS, HOT_CHANNELS, LV_DRIFT_HOURS,
@@ -36,8 +37,10 @@ BANNER = ("SYNTHETIC, NOT CMS DATA. Detector names follow public CMS naming; eve
 LUMI_PB_PER_S = 0.018
 NOMINAL_V = 8.0
 NOMINAL_TEMP_C = 22.0
-_BYTES_PER_ROW = 400          # measured on the tiny preset, rounded up
-_MAX_CADENCE_S = 6 * HOUR
+_BYTES_PER_ROW = 400          # Record bytes per entry, measured on the tiny preset, rounded up
+_BYTES_PER_SAMPLE = 4         # archive: one float32 per sample
+_MAX_CADENCE_S = 15 * MINUTE
+QUANTITIES = (("lv_voltage", "V"), ("temperature", "degC"))
 
 
 class SizeBudgetError(Exception):
@@ -46,24 +49,31 @@ class SizeBudgetError(Exception):
 
 # ------------------------------------------------------------------------------- size budget
 def estimate_rows(cfg: DeviceConfig) -> int:
-    machine_state = cfg.n_boxes * 2 * cfg.days * DAY // cfg.ms_cadence_s
+    """Entries in the Record. Readings add only their status changes, a few per box per day."""
+    status = cfg.n_boxes * len(QUANTITIES) * (2 + cfg.days)
     runs = cfg.days * 7
     per_run = cfg.n_boxes + len(cfg.subdetectors) + 3
-    return machine_state + runs * per_run + cfg.days * 10 + 400
+    return status + runs * per_run + cfg.days * 10 + 400
+
+
+def estimate_bytes(cfg: DeviceConfig) -> int:
+    """Record plus archive."""
+    samples = cfg.n_boxes * len(QUANTITIES) * cfg.days * DAY // cfg.raw_cadence_s
+    return estimate_rows(cfg) * _BYTES_PER_ROW + samples * _BYTES_PER_SAMPLE
 
 
 def fit_to_budget(cfg: DeviceConfig) -> tuple[DeviceConfig, list[str]]:
-    """Coarsen the machine-state windows, then shorten the calendar, until it fits."""
+    """Sample the archive less often, then shorten the calendar, until Record plus archive fit."""
     if cfg.max_size_mb > HARD_CAP_MB:
         raise SizeBudgetError(f"max size {cfg.max_size_mb} MB is above the hard cap of {HARD_CAP_MB} MB")
     if cfg.max_size_mb <= 0:
         raise SizeBudgetError("max size must be positive")
     notes: list[str] = []
     target = cfg.max_size_mb * 1e6 * 0.85
-    while estimate_rows(cfg) * _BYTES_PER_ROW > target:
-        if cfg.ms_cadence_s < _MAX_CADENCE_S:
-            cfg = replace(cfg, ms_cadence_s=min(cfg.ms_cadence_s * 2, _MAX_CADENCE_S))
-            notes.append(f"machine-state window widened to {cfg.ms_cadence_s} s")
+    while estimate_bytes(cfg) > target:
+        if cfg.raw_cadence_s < _MAX_CADENCE_S:
+            cfg = replace(cfg, raw_cadence_s=min(cfg.raw_cadence_s * 2, _MAX_CADENCE_S))
+            notes.append(f"archive sampled every {cfg.raw_cadence_s} s")
         elif cfg.days > 3:
             days = max(3, int(cfg.days * 0.8))
             scale = days / cfg.days
@@ -77,12 +87,13 @@ def fit_to_budget(cfg: DeviceConfig) -> tuple[DeviceConfig, list[str]]:
 
 # ----------------------------------------------------------------------------------- writer
 class _Gen:
-    def __init__(self, store: RecordStore, cfg: DeviceConfig, model: DeviceModel, plan: Plan):
+    def __init__(self, store: RecordStore, cfg: DeviceConfig, model: DeviceModel, plan: Plan, archive_dir: Path):
         self.store, self.cfg, self.model, self.plan = store, cfg, model, plan
+        self.archive_dir = archive_dir
         self.noise = random.Random(f"{cfg.seed}:noise")
         self.words = random.Random(f"{cfg.seed}:words")
         self.idx: dict[tuple, int] = {}                  # handles to background entries
-        self.voltage_ids: dict[str, list[tuple[int, int]]] = {}   # box -> (t_start, entry id)
+        self.status_ids: dict[tuple[str, str], list[tuple[int, str, int]]] = {}  # (box, quantity) -> (t, status, entry id)
         self.planted: list[dict[str, Any]] = []
         self.attached: set[tuple[int, int]] = set()
         self.touched: list[int] = []                     # entries the current fault script wrote or used
@@ -92,11 +103,11 @@ class _Gen:
     # -- helpers ------------------------------------------------------------------------
     def add(self, source: str, record_class: str, kind: str, type: str, element: str, t: int,
             known: Optional[int] = None, t_end: Optional[int] = None,
-            payload: Optional[dict] = None) -> int:
+            payload: Optional[dict] = None, raw_ref: Optional[str] = None) -> int:
         eid = self.store.add_entry(Entry(
             source=source, record_class=record_class, kind=kind, type=type, element=element,
             t_start=t, t_end=t_end, known_at=t if known is None else known, payload=payload or {},
-            raw_ref=f"synthetic://{source}/{type}/{element}?t={to_iso(t)}",
+            raw_ref=raw_ref or f"synthetic://{source}/{type}/{element}?t={to_iso(t)}",
             producer=PRODUCER, producer_version=VERSION,
         ))
         self.touched.append(eid)
@@ -220,22 +231,28 @@ class _Gen:
             self.elog(texts.SHIFT_LEADER, DETECTOR, run.start + 4 * MINUTE,
                       self.say("run_start", run=run.number, fill=run.fill))
 
-        # sparsified machine state: one summary per box per window
-        cadence = self.cfg.ms_cadence_s
+        # readings: the full series go to the control-system archive (the source, not the
+        # Record); the Record gets an entry only when a reading's status changes
+        cad = self.cfg.raw_cadence_s
+        n = (p.end - p.start) // cad
+        noise_of = {"lv_voltage": 0.004, "temperature": 0.05}
+        value_of = {"lv_voltage": self.voltage, "temperature": self.temperature}
+        series = {}
         for box in m.boxes:
-            ids = self.voltage_ids.setdefault(box, [])
-            for t0 in range(p.start, p.end, cadence):
-                t1 = t0 + cadence
-                times = [t0 + cadence * k // 5 for k in range(5)]
-                volts = [self.voltage(box, t) + self.noise.gauss(0, 0.004) for t in times]
-                temps = [self.temperature(box, t) + self.noise.gauss(0, 0.05) for t in times]
-                hours = (times[-1] - times[0]) / HOUR
-                ids.append((t0, self.add("dcs", "MS", "feature", "lv_voltage", box, t0, known=t1, t_end=t1, payload={
-                    "unit": "V", "mean": round(sum(volts) / 5, 4), "min": round(min(volts), 4),
-                    "max": round(max(volts), 4), "slope_per_h": round((volts[-1] - volts[0]) / hours, 4)})))
-                self.add("dcs", "MS", "feature", "temperature", box, t0, known=t1, t_end=t1, payload={
-                    "unit": "degC", "mean": round(sum(temps) / 5, 3), "min": round(min(temps), 3),
-                    "max": round(max(temps), 3), "slope_per_h": round((temps[-1] - temps[0]) / hours, 3)})
+            for quantity, unit in QUANTITIES:
+                f, sd = value_of[quantity], noise_of[quantity]
+                series[(box, quantity)] = (unit, lambda i, f=f, box=box, sd=sd: f(box, p.start + i * cad) + self.noise.gauss(0, sd))
+        written = readings.write_archive(self.archive_dir, p.start, cad, n, series,
+                                         {"system": "control-system archive (synthetic)", "banner": BANNER})
+        for (box, quantity), values in written.items():
+            rule = readings.RULES[quantity]
+            reference, changes = readings.status_changes(p.start, cad, values, rule)
+            ids = self.status_ids.setdefault((box, quantity), [])
+            for t_start, t_known, status, reading in changes:
+                ids.append((t_start, status, self.add(
+                    "dcs", "MS", "state", f"{quantity}_status", box, t_start, known=t_known,
+                    payload={"value": status, "reading": reading, "reference": reference, "unit": rule.unit},
+                    raw_ref=f"source://control_archive/{box}/{quantity}?from={t_start}")))
 
         # data-quality summary per run and box; certification per run and subdetector
         for run in p.runs:
@@ -419,9 +436,9 @@ class _Gen:
                                  [(trip, "symptom"), (e1, "symptom"), (e2, "action"), (down, "downtime")])
         self.store.label_incident(iid, "recovery_action", f"Power-cycle {supply}", opened)
         self.certify(iid, f, sub)
-        drift = [(eid, "the output voltage was falling steadily before the trip")
-                 for t0, eid in self.voltage_ids[boxes[0]]
-                 if f.t - LV_DRIFT_HOURS * HOUR <= t0 < f.t][::4]
+        drift = [(eid, f"the output voltage was {status} before the trip; the series is in the control-system archive")
+                 for t0, status, eid in self.status_ids[(boxes[0], "lv_voltage")]
+                 if f.t - LV_DRIFT_HOURS * HOUR <= t0 < f.t and status in ("drifting down", "low")]
         self.conclude(iid, supply, f, f.t + 14 * DAY,
                       self.say("lv_cause", supply=supply, hours=LV_DRIFT_HOURS), drift)
         self.plant(f, supply, f.t + 5 * MINUTE, iid)
@@ -525,14 +542,21 @@ class _Gen:
 
 # --------------------------------------------------------------------------------- entry point
 def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dict[str, Any]:
-    """Write ``record.db`` and ``planted.json`` into ``out_dir``. Returns a short summary."""
+    """Write ``record.db``, ``planted.json`` and the control-system archive into ``out_dir``.
+
+    The archive (``source/control_archive/``) stands in for an existing system; it is not
+    part of the Record. Returns a short summary.
+    """
     cfg, notes = fit_to_budget(cfg)
     out = Path(out_dir)
     db_path, planted_path = out / "record.db", out / "planted.json"
+    archive_dir = out / "source" / "control_archive"
     if db_path.exists():
         if not force:
             raise FileExistsError(f"{db_path} exists; pass force=True (--force) to rebuild it")
         db_path.unlink()
+    if archive_dir.exists():
+        shutil.rmtree(archive_dir)
 
     model = build_model(cfg)
     plan = build_plan(cfg, model)
@@ -543,7 +567,7 @@ def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dic
         "lumisection_s": str(LUMISECTION_S),
     })
     write_model(store, model)
-    gen = _Gen(store, cfg, model, plan)
+    gen = _Gen(store, cfg, model, plan, archive_dir)
     gen.background()
     gen.run_faults()
     gen.finish_planted()
@@ -551,13 +575,17 @@ def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dic
     store.close()
 
     size_mb = db_path.stat().st_size / 1e6
-    if size_mb > cfg.max_size_mb:
+    archive_mb = sum(f.stat().st_size for f in archive_dir.iterdir()) / 1e6
+    if size_mb + archive_mb > cfg.max_size_mb:
         db_path.unlink()
-        raise SizeBudgetError(f"Record came out at {size_mb:.1f} MB, over the {cfg.max_size_mb} MB budget")
+        shutil.rmtree(archive_dir)
+        raise SizeBudgetError(f"Record ({size_mb:.1f} MB) plus archive ({archive_mb:.1f} MB) came out "
+                              f"over the {cfg.max_size_mb} MB budget")
 
     out.mkdir(parents=True, exist_ok=True)
     planted_path.write_text(json.dumps({"banner": BANNER, "seed": cfg.seed, "preset": cfg.preset,
                                         "modes": texts.MODES, "planted": gen.planted}, indent=2) + "\n")
     return {"db": str(db_path), "planted": str(planted_path), "size_mb": round(size_mb, 2),
+            "archive": str(archive_dir), "archive_mb": round(archive_mb, 2),
             "config": cfg, "adjustments": notes, "counts": counts, "n_planted": len(gen.planted),
             "fills": len(plan.fills), "runs": len(plan.runs)}

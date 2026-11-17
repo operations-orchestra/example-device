@@ -219,10 +219,11 @@ def test_replay_follows_an_incident_without_showing_the_future(call, tiny, store
 def test_built_page_examples_are_real_rows(call, store, end):
     _, body = call("built", as_of=end)
     ex = body["examples"]
-    assert ex["voltage"]["type"] == "lv_voltage" and set(ex["voltage"]["payload"]) >= {"mean", "min", "max", "slope_per_h"}
+    assert ex["voltage"]["type"] == "lv_voltage_status" and ex["voltage"]["payload"]["value"] == "drifting down"
+    assert ex["voltage"]["raw_ref"].startswith("source://control_archive/")
+    assert body["archive"]["channels"] == 8 and body["share"]["status"] < body["share"]["total"]
     assert ex["quality"]["type"] == "occupancy_summary" and ex["note"]["type"] == "shift_note"
     assert store.get_entry(ex["voltage"]["id"], end).payload == ex["voltage"]["payload"]
-    assert body["config"]["ms_cadence_s"] == ex["voltage"]["t_end"] - ex["voltage"]["t_start"]
     assert body["incident_example"]["n_links"] > 0
     # every "where in the code" link resolves to a real line
     assert all(spot and spot["line"] > 0 for spot in body["source"].values()), body["source"]
@@ -230,3 +231,20 @@ def test_built_page_examples_are_real_rows(call, store, end):
     direct, indirect = body["links"]["direct"], body["links"]["indirect"]
     assert direct["link"]["link_type"] == "direct" and direct["src"]["type"] == "downtime" and direct["dst"]["type"] == "run_stop"
     assert indirect["link"]["link_type"] == "indirect" and indirect["dst"]["type"] == "root_cause" and indirect["link"]["rationale"]
+
+
+def test_timeline_readings_come_from_the_archive_and_stop_at_the_moment(call, tiny, store):
+    case = next(c for c in tiny["planted_cases"] if c["mode"] == "lv_drift_trip")
+    t0, t1 = store.time_span()
+    _, body = call("timeline", element="HBP02", as_of=case["ask_at"])
+    volts = next(p for p in body["panels"] if p["type"] == "lv_voltage")
+    assert volts["from_source"] and body["archive"]
+    points = volts["series"][0]["points"]
+    assert points and max(p["t0"] for p in points) <= case["ask_at"]
+    status = next(r for r in body["strip"] if r["row"] == "Reading status")["items"]
+    # five minutes after the trip, "off" is not on record yet: the rule needs it to hold for ten
+    assert [i["value"] for i in status if i["text"].startswith("HBP02 low voltage")] == ["drifting down", "low"]
+    # zooming in asks the source again, at full resolution
+    _, zoom = call("timeline", element="HBP02", as_of=t1, t0=case["t_event"] - 1800, t1=case["t_event"])
+    pts = next(p for p in zoom["panels"] if p["type"] == "lv_voltage")["series"][0]["points"]
+    assert all(p["n"] == 1 for p in pts) and len(pts) > 20

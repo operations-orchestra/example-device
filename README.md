@@ -25,8 +25,9 @@ behind it, the next steps and hand-off notes are in [docs/DESIGN.md](docs/DESIGN
 | `aggregator/` | the Operations Record (SQLite), its write and read APIs, viewing tools | runs |
 | `example_device/` | the seeded generator for the synthetic device | runs |
 | `viewer/` | a local, read-only web page for looking inside the Record and its components | runs |
+| `adapters/` | reads a source system on demand; one so far, for the simulated control-system archive | runs |
 | `orchestrator/` | typed query tools and the diagnosis agent | not built yet |
-| `adapters/`, `anonymizer/`, `summarizer/`, `sparsifier/` | the feed into the Record, interfaces only | not built yet |
+| `anonymizer/`, `summarizer/`, `sparsifier/`, other adapters | the rest of the feed into the Record | not built yet |
 
 The folders are named after the repositories of the `operations-orchestra` organization
 so each can move to its own repository later. A test keeps their imports separate.
@@ -35,7 +36,8 @@ so each can move to its own repository later. A test keeps their imports separat
 
 ```bash
 pixi install
-pixi run orchestra synth                 # builds out/record.db (about 1 MB) and out/planted.json
+pixi run orchestra synth                 # builds out/record.db, out/planted.json, and a simulated
+                                         # control-system archive in out/source/ (not part of the Record)
 pixi run orchestra view                  # open http://127.0.0.1:8765/ to browse the Record
 pixi run orchestra info                  # row counts, entry types, incident list
 pixi run orchestra show 3                # one incident as a text timeline

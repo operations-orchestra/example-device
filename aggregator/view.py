@@ -23,8 +23,8 @@ def describe(entry: StoredEntry, width: int = 100) -> str:
     p = entry.payload
     if "text" in p:
         s = f'{p.get("author_role", "?")}: {p["text"]}'
-    elif entry.type in ("lv_voltage", "temperature"):
-        s = f'mean {p["mean"]} {p["unit"]}, slope {p["slope_per_h"]}/h'
+    elif entry.type.endswith("_status"):
+        s = f'{p["value"]} (reading {p["reading"]} {p["unit"]}, setpoint {p["reference"]})'
     elif entry.type == "downtime":
         s = f'{p["duration_s"] // 60} min, {p["lost_lumi_pb"]} /pb lost, {p["category"]}: {p["details"]}'
     else:
@@ -97,8 +97,13 @@ def scope(store: RecordStore, element: str) -> tuple[list[str], list[str]]:
 
 def plot_element(store: RecordStore, element: str, out_path: str | Path,
                  t0: Optional[int] = None, t1: Optional[int] = None,
-                 as_of: Optional[int] = None) -> Path:
-    """Save a PNG timeline for one element: readings on top, what people recorded below."""
+                 as_of: Optional[int] = None, series=None) -> Path:
+    """Save a PNG timeline for one element: readings on top, what people recorded below.
+
+    Readings are not in the Record. ``series(box, quantity, t0, t1, as_of)`` fetches them from
+    the source (see adapters/control_archive.py) as points with t0, t1, v, lo, hi; without it
+    the reading panels stay empty.
+    """
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -130,6 +135,13 @@ def plot_element(store: RecordStore, element: str, out_path: str | Path,
 
     for ax, (etype, key, label) in zip(axes, panels):
         for box, colour in zip(shown, SERIES):
+            if etype in ("lv_voltage", "temperature"):
+                pts = series(box, etype, t0, t1, as_of) if series else []
+                xs = [dt((q["t0"] + q["t1"]) // 2) for q in pts]
+                ax.plot(xs, [q["v"] for q in pts], color=colour, lw=2, label=box)
+                if len(shown) == 1 and pts:
+                    ax.fill_between(xs, [q["lo"] for q in pts], [q["hi"] for q in pts], color=colour, alpha=0.15, lw=0)
+                continue
             es = store.entries(as_of, elements=[box], t0=t0, t1=t1, types=[etype])
             if etype == "occupancy_summary":       # one flat segment per run
                 for n, e in enumerate(es):
