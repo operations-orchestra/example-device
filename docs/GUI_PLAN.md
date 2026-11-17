@@ -1,6 +1,9 @@
 # Plan: a GUI to understand and check what has been built
 
-Status: steps 1 to 5 and the Read API page are built (16 November 2026). Not built: the
+**The GUI was remade on 16 November 2026. Section 11 describes it as it is now and
+supersedes the page list, the three marks and the switches in sections 4 to 6 and 10.**
+
+Earlier status: steps 1 to 5 and the Read API page were built (16 November 2026). Not built: the
 Build-a-Record control (still an open decision), and the Tools, Agent and Feed pages, which
 wait for the orchestrator. See section 10 for what was built differently from this plan.
 Read [DESIGN.md](DESIGN.md) first for vocabulary and the current state of the code.
@@ -294,3 +297,48 @@ after serving, path traversal is refused). Home, Timeline, Incident, Device, Pre
 Planted answers and Entries were each loaded once in headless Chrome and looked at.
 Not checked by anyone yet: interactive behaviour in a real browser (drag to zoom, hover
 values, Play, the two switches, the Read API form), dark mode, and narrow screens.
+
+## 11. The remake
+
+**Why.** The first version did three jobs at once: reference material, browsing, and
+replay. The time control sat on every page, including pages it meant nothing for, and
+almost every page carried "as known at the time control" wording. Three switches and five
+kinds of badge added noise. The project lead's reading order is: understand what the
+Record is, then browse it, then replay.
+
+**Structure now.**
+
+| # | Page | Job |
+|---|---|---|
+| 1 | The detector (landing) | The detector model. States up front that the data is invented and that the Record was written directly by a generator. |
+| 2 | How the Record is built | The designed feed beside what runs in the demo. Three sources (a voltage reading, a data-quality plot, a logbook note) followed into real entries. Links and incidents. A table of the design choices the demo fixes on the feed's behalf. |
+| 3 | What is in the Record | Tables, Entries, Incidents, Timeline. The complete Record, no time control. |
+| 4 | Scenarios in this demo | The planted situations and what the generator wrote for each. |
+| 5 | Replay | Pick an incident; the page compares the two precedent rules for each. |
+| - | For developers: read API | Linked from the foot of the navigation. |
+
+**Replay is a mode.** Outside it, every read is made as of the end of the Record and no
+time wording appears; an empty label reads "none recorded". Starting a replay (from the
+Replay page, an incident, or a scenario) shows a bar with the moment, previous and next
+step, Play, three jumps and Exit. While it is on, every page shows the Record as it stood
+then, and an empty label reads "not known yet". A step is the next moment the Record
+learned something about the incident being followed. Steps are times only.
+
+**What a replay shows before the incident is opened.** Only the problem's symptoms: they
+are what the crew is looking at. Evidence that an expert attaches later is not listed
+until that attachment is recorded, because listing it early would point at the answer.
+The replay knows which problem it follows (title, element, start); it says so on the page.
+
+**Demo-only material has three homes** instead of a group and a switch: the generator is
+drawn on "How the Record is built" as the stand-in for the feed; the planted situations
+are the Scenarios page; the planted answers are an answer key revealed inside Replay.
+
+**Removed:** the Home page, the "Demo only" navigation group, the "Production view" and
+"Show planted answers" switches, the expert-filled, demo-only and LLM badges, the
+"Who writes what" page and `viewer/provenance.py`, the slider, and "Pin for comparison".
+That nothing in the demo is written by a language model is now one sentence on page 2.
+
+**Checked:** `tests/test_viewer.py`, including that a replay returns nothing known later and
+no early evidence. Every page, and three pages inside a replay, were loaded in headless
+Chrome and confirmed to render; five were looked at as screenshots. Not checked by anyone:
+clicking through a replay (step, Play, jumps, Exit), drag-to-zoom, and the answer-key box.

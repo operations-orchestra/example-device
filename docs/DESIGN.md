@@ -33,7 +33,7 @@ It is split into two parts on purpose:
 | The Record: database, write API, as-of read API | `aggregator/` | built, tested |
 | Text and plot viewing commands | `aggregator/view.py` | built, tested |
 | Synthetic device generator | `example_device/` | built, tested |
-| GUI to understand and check the components | `viewer/` | built except the agent pages; see GUI_PLAN.md section 10 |
+| GUI to understand and check the components | `viewer/` | built and remade once; see GUI_PLAN.md section 11 |
 | Query tools and diagnosis agent | `orchestrator/` | designed, not built, section 6 |
 | Feed interfaces | `adapters/`, `anonymizer/`, `summarizer/`, `sparsifier/` | designed, not built, section 6 |
 
@@ -168,7 +168,7 @@ orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
 orchestra view  [--db FILE] [--port N]
 ```
 
-### 4.5 Tests (68 pass, 1 skipped until `orchestrator/` exists)
+### 4.5 Tests (74 pass, 1 skipped until `orchestrator/` exists)
 
 | File | Checks |
 |---|---|
@@ -201,7 +201,8 @@ every page. It covers the device and its fault scripts, the Record, zoomable tim
 how knowledge about an incident arrived, a side-by-side comparison of the two possible
 precedent rules, and, once they exist, the query tools and the agent.
 
-It is built up to the Precedents and Read API pages. What comes next is the project
+It was remade after review into five ordered pages (detector, how the Record is built,
+what is in it, scenarios, replay); GUI_PLAN.md section 11 is the current description. What comes next is the project
 lead's review of the synthetic data with it (open questions 1 and 2), then section 6.
 
 ## 6. After that: the agent and the feed interfaces
@@ -283,6 +284,30 @@ interfaces into running code.
 8. **This is a shared repository.** Work on the branch; push or open a pull request only
    with the project lead's agreement.
 
+## 7a. Design notes from review
+
+**Sparsification is a key design choice, currently hidden in the generator.** A reading is
+stored as four numbers per window (mean, minimum, maximum, slope); the window is 15
+minutes in `tiny` and is widened automatically when a Record would exceed its size
+budget. In production this is the sparsifier's decision. What it costs: anything faster
+than a window is lost, the slope inside one window is about as large as the noise, and a
+storage limit ends up deciding what the Record can represent. The demo cannot test
+whether diagnoses survive the compression, because it has no full-resolution data. The
+GUI states this on "How the Record is built". A working sparsifier fed by a raw series was
+discussed and deferred.
+
+**Data-quality plots.** The demo has none: one row of five numbers per run and box.
+Direction from the project lead: the Record should keep the plots relevant to an
+incident, a very small fraction of all plots. Ideally the logbook entry references the
+plot and the Record stores a pointer. In practice it will mostly have to be the images
+attached to logbook entries. Still open, and hard: who or what decides which plots are
+relevant, and whether an image is copied or only pointed to when the source may not keep
+it. The schema needs no change: a plot is one more entry attached to the incident.
+
+**The feed is not simulated.** The generator writes entries directly. None of the adapters,
+anonymizer, summarizer or sparsifier exists, not even as an interface file, and there is no
+raw data for them to consume.
+
 ## 8. Open questions for the project lead
 
 | # | Question | Blocks |
@@ -303,7 +328,7 @@ been pushed. Once it is:
 git clone git@github.com:operations-orchestra/example-device.git
 cd example-device && git checkout prototype/synthetic-record
 pixi install                      # or: pip install -e '.[plot,dev]' on Python 3.10+
-pixi run pytest -q                # 68 pass, 1 skipped
+pixi run pytest -q                # 74 pass, 1 skipped
 pixi run orchestra synth          # out/record.db, out/planted.json
 pixi run orchestra info
 pixi run orchestra show 3 --as-of 2040-03-02T12:06
@@ -313,5 +338,5 @@ Read in this order: this document, `utils/entry.py`, `aggregator/schema.sql`,
 `aggregator/store.py` (read API at the bottom half), `example_device/plan.py`, then
 `example_device/generator.py`.
 
-Start by running `orchestra view` and reading the Device and Precedents pages. The next
+Start by running `orchestra view` and reading the pages in their numbered order. The next
 building step is section 6, once open questions 1 and 2 are answered.

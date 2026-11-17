@@ -49,13 +49,20 @@ Without pixi: `pip install -e '.[plot,dev]'` on Python 3.10 or later.
 ## The Record browser
 
 `orchestra view` starts a local web page (Python standard library only, bound to
-localhost, Record opened read-only). One time control at the top governs every page:
-nothing shown is later than it. Use `--db out/small/record.db` for the larger preset.
+localhost, Record opened read-only). Use `--db out/small/record.db` for the larger preset.
 
-Every page and field is marked as one of: production-like (no mark, uses only what is in
-the Record), **expert-filled** (present in a real Record only where experts reviewed an
-incident), or **demo only** (exists because the data is synthetic). The "Production view"
-switch hides everything demo-only. See [docs/GUI_PLAN.md](docs/GUI_PLAN.md).
+It is ordered for a first-time reader:
+
+1. **The detector**: the model everything else refers to.
+2. **How the Record is built**: the designed feed next to what the demo does instead,
+   and the design choices the demo fixes silently.
+3. **What is in the Record**: tables, entries, incidents, timelines, shown complete.
+4. **Scenarios in this demo**: the situations the generator planted.
+5. **Replay**: wind the Record back to a moment and step through an incident. Only
+   here does a time control appear; while it is on, every page shows the Record as it
+   stood then.
+
+See [docs/GUI_PLAN.md](docs/GUI_PLAN.md), section 11.
 
 ## The synthetic Record
 

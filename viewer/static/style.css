@@ -111,3 +111,17 @@ table.raw .hl { background: var(--grid); }
 .badge.llm-w { background: var(--llm); color: #fff; } .badge.llm-a { border: 1px dashed var(--llm); color: var(--llm); }
 span.llm-w { background: var(--llm-bg); box-shadow: inset 0 -2px 0 var(--llm); } span.llm-a { border-bottom: 2px dotted var(--llm); }
 @media (prefers-color-scheme: dark) { .badge.llm-w { color: #0d0d0d; } }
+
+/* remake: numbered navigation, replay bar, notes */
+nav a.navtop { font-weight: 600; margin-top: 6px; display: flex; align-items: center; } nav a.navtop .n { flex: none; display: inline-block; width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 50%; background: var(--grid); font-size: 12px; margin-right: 8px; }
+nav .subs { margin-left: 28px; border-left: 1px solid var(--grid); padding-left: 4px; } nav .subs a { font-size: 13px; padding: 3px 8px; }
+nav .navfoot { margin-top: 26px; padding: 8px; border-top: 1px solid var(--grid); font-size: 12px; } nav .navfoot a { color: var(--ink2); padding: 0; }
+.clock { background: var(--demo-bg); border-bottom: 2px solid var(--demo); } .clock[hidden] { display: none; }
+.clock .spacer { flex: 1; } .clock a { margin: 0 4px; }
+.lead { font-size: 15px; max-width: 84ch; }
+.note { background: var(--surface); border: 1px solid var(--grid); border-left: 4px solid var(--accent); border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 12px 0; max-width: 100ch; }
+.note.keynote, .key-col { background: var(--demo-bg); } .note.keynote { border-left-color: var(--demo); }
+.three { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; } .three .card { margin: 0; } .three .card p { margin: 6px 0 0; }
+.flow .box.real { border-color: var(--accent); border-width: 2px; } .flow .box.demo { border-color: var(--demo); border-width: 2px; border-left-width: 5px; }
+.key i.c0 { background: var(--axis); } .c0 { stroke: var(--axis); fill: var(--axis); }
+details > summary { cursor: pointer; margin: 8px 0; } details ul { margin: 4px 0; max-width: 90ch; }

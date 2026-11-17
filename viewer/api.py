@@ -4,7 +4,6 @@ Rule: every endpoint that reads Record content requires ``as_of`` and returns no
 known later. The exceptions are named explicitly:
   * ``meta``       - which Record is loaded and its time range (needed to set the clock)
   * ``next_known`` - returns a time only, never content
-  * ``provenance`` - explanatory text about who writes what; reads nothing from the Record
   * ``demo/*``     - demo-only endpoints that read planted.json, the generator's own list
 
 The browser does no filtering of its own.
@@ -20,7 +19,6 @@ from aggregator import TABLES, RecordStore, StoredEntry
 from aggregator.view import scope
 
 from . import precedents as prec
-from . import provenance as prov
 
 
 class ApiError(Exception):
@@ -323,9 +321,66 @@ def _plain(x: Any) -> Any:
     return str(x)
 
 
-def provenance(store: RecordStore, q: dict, ctx: dict) -> dict:
-    """Who writes what, in production and in the demo. Explanatory text; reads nothing from the Record."""
-    return prov.lookup()
+def replay(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """One incident as the Record stood at a moment, for stepping through how knowledge arrived.
+
+    ``frame``, ``ask_time`` and ``steps`` describe the replay itself (which problem, and the
+    moments at which something was learned: times only). Everything else is Record content
+    known by ``as_of``.
+    """
+    as_of = _as_of(q)
+    iid = _int(q, "id", required=True)
+    frame = store.incident_frame(iid)
+    if frame is None:
+        raise ApiError("no such incident", 404)
+    view = store.incident(iid, as_of)
+    rows = store.incident_entries_seen(iid, as_of)
+    ids = {e.id for _, e in rows}
+    links = {}
+    for _, e in rows:
+        for link in store.links(e.id, as_of):
+            if link.src_entry_id in ids and link.dst_entry_id in ids:
+                links[link.id] = asdict(link)
+    learned = None
+    since = _int(q, "since")
+    if since is not None and since < as_of:
+        got = store.became_known(since, as_of, limit=2000)
+        learned = {"since": since,
+                   "entries": [_e(e) for e in got["entries"] if e.id in ids],
+                   "changes": [c for c in got["incident_changes"] if c["incident_id"] == iid]}
+    return {"frame": frame, "ask_time": prec.first_ask_time(store, iid),
+            "steps": store.incident_step_times(iid),
+            "incident": asdict(view) if view else None,
+            "entries": [{"role": r, **_e(e)} for r, e in rows], "links": list(links.values()),
+            "precedents": prec.at_moment(store, iid, as_of), "learned": learned}
+
+
+def built(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """Real rows used as worked examples on the 'how the Record is built' page."""
+    as_of = _as_of(q)
+    config = json.loads(store.meta().get("config", "{}"))
+    volts = store.entries(as_of, types=["lv_voltage"])
+    steady = [e for e in volts if e.payload["min"] > 7]          # a window in which the supply stayed on
+    voltage = min(steady, key=lambda e: e.payload["mean"]) if steady else (volts[0] if volts else None)
+    quality = store.entries(as_of, types=["occupancy_summary"])
+    hot = next((e for e in quality if e.payload["hot_fraction"] > 0), quality[0] if quality else None)
+    notes = store.entries(as_of, types=["shift_note"])
+    note = next((e for e in notes if store.incidents_of_entry(e.id, as_of)), notes[0] if notes else None)
+    incidents_ = store.incidents(as_of)
+    example = None
+    for inc in incidents_:
+        attached = store.incident_entries(inc.id, as_of)
+        n_links = len({l.id for _, e in attached for l in store.links(e.id, as_of) if l.link_type == "indirect"})
+        if n_links:
+            example = {"incident": asdict(inc), "n_entries": len(attached), "n_links": n_links}
+            break
+    by_type = store.counts_by_type(as_of)
+    text_types = {"shift_note", "followup", "root_cause", "closing_note", "daily_run_summary", "cert_flag", "downtime"}
+    return {"config": config, "counts": store.table_counts(as_of), "by_type": by_type,
+            "n_text": sum(n for _, _, t, _, n in by_type if t in text_types),
+            "examples": {"voltage": _e(voltage) if voltage else None, "quality": _e(hot) if hot else None,
+                         "note": _e(note) if note else None},
+            "incident_example": example}
 
 
 # ------------------------------------------------------------------ demo-only endpoints
@@ -371,8 +426,8 @@ ROUTES: dict[str, Callable[[RecordStore, dict, dict], dict]] = {
     "meta": meta, "next_known": next_known, "overview": overview, "elements": elements,
     "entries": entries, "entry": entry, "incidents": incidents, "incident": incident,
     "timeline": timeline, "tables": tables, "map": detector_map, "diff": diff, "precedents": precedents, "read": read,
-    "provenance": provenance, "demo/planted": demo_planted, "demo/device": demo_device,
+    "replay": replay, "built": built, "demo/planted": demo_planted, "demo/device": demo_device,
 }
 # Endpoints that may be called without as_of, and why (see the module docstring).
-NO_AS_OF = {"meta", "next_known", "provenance", "demo/planted", "demo/device"}
+NO_AS_OF = {"meta", "next_known", "demo/planted", "demo/device"}
 DEMO_ONLY = {"demo/planted", "demo/device"}

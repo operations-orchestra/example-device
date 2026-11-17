@@ -13,7 +13,8 @@ from viewer.api import DEMO_ONLY, NO_AS_OF, ROUTES
 from viewer.server import handle_api, make_server
 
 ARGS = {"entry": {"id": "33"}, "incident": {"id": "3"}, "timeline": {"element": "HFP02"},
-        "diff": {"since": "0"}, "read": {"method": "incidents"}, "next_known": {"t": "0"}}
+        "diff": {"since": "0"}, "read": {"method": "incidents"}, "next_known": {"t": "0"},
+        "replay": {"id": "3"}}
 
 
 @pytest.fixture()
@@ -45,10 +46,10 @@ def test_reads_are_refused_without_as_of(call, route):
 
 
 def test_only_named_endpoints_skip_as_of():
-    assert NO_AS_OF == {"meta", "next_known", "provenance"} | DEMO_ONLY
+    assert NO_AS_OF == {"meta", "next_known"} | DEMO_ONLY
 
 
-@pytest.mark.parametrize("route", ["overview", "entries", "incidents", "timeline", "precedents", "read", "map"])
+@pytest.mark.parametrize("route", ["overview", "entries", "incidents", "timeline", "precedents", "read", "map", "replay", "built", "tables"])
 def test_no_endpoint_returns_anything_from_the_future(call, store, route):
     t0, _ = store.time_span()
     rng = random.Random(11)
@@ -181,9 +182,41 @@ def test_detector_map_shows_state_at_the_time_control(call, tiny):
     assert [i["id"] for i in later["open_issues"]] == [hot["incident_id"]]
 
 
-def test_every_entry_type_says_who_writes_it(call, store, end):
-    _, body = call("provenance")
-    covered = {m for item in body["items"] if item["scope"] == "entry" for m in item["match"]}
-    in_record = {f"{src}/{typ}" for _, src, typ, _, _ in store.counts_by_type(end)}
-    assert in_record <= covered, sorted(in_record - covered)
-    assert all(item["by"] in body["by_label"] and item["production"] and item["demo"] for item in body["items"])
+def test_replay_follows_an_incident_without_showing_the_future(call, tiny, store):
+    first, second = [c for c in tiny["planted_cases"] if c["mode"] == "configure_failure"]
+    end = store.latest_known_at()
+    _, full = call("replay", id=second["incident_id"], as_of=end)
+    assert full["frame"]["id"] == second["incident_id"] and full["steps"] == sorted(set(full["steps"]))
+    ask = full["ask_time"]
+    status, body = call("replay", id=second["incident_id"], as_of=ask)
+    assert status == 200
+    assert body["incident"] is None                               # the Record has not opened it yet
+    assert body["entries"] and all(e["known_at"] <= ask for e in body["entries"])
+    assert all(e["role"] is None for e in body["entries"])        # on record, not yet linked to an incident
+    # only the symptoms the crew is looking at: the expert's later evidence must not appear early
+    final_roles = {e["id"]: e["role"] for e in full["entries"]}
+    assert {final_roles[e["id"]] for e in body["entries"]} == {"symptom"}
+    assert "evidence" in final_roles.values()
+    assert body["links"] == []
+    assert [r["id"] for r in body["precedents"]["same_symptom"]] == [first["incident_id"]]
+    earlier = body["precedents"]["same_symptom"][0]
+    assert earlier["recovery_action"] and earlier["confirmed_cause"] is None
+    assert all(t <= ask for t in _known_times(body))
+    # one step later the Record has learned something about it
+    nxt = next(t for t in full["steps"] if t > ask)
+    _, later = call("replay", id=second["incident_id"], as_of=nxt, since=ask)
+    assert later["learned"]["entries"] or later["learned"]["changes"]
+    assert len(later["entries"]) >= len(body["entries"])
+    # the first occurrence has no precedent under either rule
+    _, one = call("replay", id=first["incident_id"], as_of=first["ask_at"])
+    assert one["precedents"]["same_element"] == [] and one["precedents"]["same_symptom"] == []
+
+
+def test_built_page_examples_are_real_rows(call, store, end):
+    _, body = call("built", as_of=end)
+    ex = body["examples"]
+    assert ex["voltage"]["type"] == "lv_voltage" and set(ex["voltage"]["payload"]) >= {"mean", "min", "max", "slope_per_h"}
+    assert ex["quality"]["type"] == "occupancy_summary" and ex["note"]["type"] == "shift_note"
+    assert store.get_entry(ex["voltage"]["id"], end).payload == ex["voltage"]["payload"]
+    assert body["config"]["ms_cadence_s"] == ex["voltage"]["t_end"] - ex["voltage"]["t_start"]
+    assert body["incident_example"]["n_links"] > 0

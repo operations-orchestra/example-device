@@ -529,6 +529,50 @@ class RecordStore:
         )
         return [(r[0], _entry(r[1:])) for r in rows]
 
+    # ----------------------------------------------------- following one incident
+    def incident_frame(self, incident_id: int) -> Optional[dict[str, Any]]:
+        """Which incident a replay follows: title, element and times only, whatever the moment.
+
+        This is the replay's frame, not Record content at a moment: it names the problem
+        being followed even before the Record has opened an incident for it.
+        """
+        row = self._db.execute(
+            "SELECT i.id, i.title, el.name, i.t_start, i.known_at FROM incident i "
+            "JOIN element el ON el.id = i.element_id WHERE i.id = ?", (incident_id,)).fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "title": row[1], "element": row[2], "t_start": row[3], "opened_at": row[4]}
+
+    def incident_entries_seen(self, incident_id: int, as_of: int) -> list[tuple[Optional[str], StoredEntry]]:
+        """What a replay shows of an incident's entries at ``as_of``.
+
+        Entries whose attachment is known are returned with their role. Before that, only
+        the problem's symptoms are returned, with role None: they are what the crew is
+        looking at, but nobody has linked them to an incident yet. Evidence an expert links
+        later is not returned early; doing so would point at the answer.
+        """
+        rows = self._db.execute(
+            f"SELECT CASE WHEN ie.known_at <= :as_of THEN ie.role END, {_ENTRY_COLS} "
+            "FROM incident_entry ie JOIN entry e ON e.id = ie.entry_id "
+            "JOIN element el ON el.id = e.element_id "
+            f"WHERE ie.incident_id = :iid AND e.known_at <= :as_of AND {_NOT_SUPERSEDED} "
+            "AND (ie.known_at <= :as_of OR ie.role = 'symptom') "
+            "ORDER BY e.t_start, e.id", {"iid": incident_id, "as_of": as_of})
+        return [(r[0], _entry(r[1:])) for r in rows]
+
+    def incident_step_times(self, incident_id: int) -> list[int]:
+        """Every moment at which the Record learned something about this incident. Times only."""
+        parts = ["SELECT ie.known_at AS k FROM incident_entry ie WHERE ie.incident_id = ?",
+                 "SELECT e.known_at FROM incident_entry ie JOIN entry e ON e.id = ie.entry_id "
+                 "WHERE ie.incident_id = ?"]
+        params = [incident_id, incident_id]
+        for c in self._INCIDENT_TIMES:
+            parts.append(f"SELECT {c} FROM incident WHERE id = ?")
+            params.append(incident_id)
+        rows = self._db.execute(
+            f"SELECT DISTINCT k FROM ({' UNION ALL '.join(parts)}) WHERE k IS NOT NULL ORDER BY k", params)
+        return [r[0] for r in rows]
+
     # ------------------------------------------------- raw rows, for illustration
     _INCIDENT_PAIRS = (("recovery_action", "recovery_known_at"), ("confirmed_cause", "cause_known_at"),
                        ("certification", "certification_known_at"), ("final_status", "closed_known_at"))
