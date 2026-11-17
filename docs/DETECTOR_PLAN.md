@@ -19,8 +19,8 @@ everything else. The toy model in this repository (`example_device/model.py`, st
 
 ## 2. cmscoord
 
-cmscoord is a separate tool, written before the Orchestra and not yet introduced to the
-project. It translates sets of CMS channels between the schemes that address them, and is
+cmscoord (repository: `git@github.com:kakwok/cmscoord.git`) is a separate tool, written
+before the Orchestra; the project lead will introduce it to the other PIs. It translates sets of CMS channels between the schemes that address them, and is
 meant to become part of the Orchestra as its detector model. What it already has:
 
 - **Channels as units, grouped in several views ("layers")**: logical (ieta, iphi, depth),
@@ -123,7 +123,7 @@ found it becomes a cmscoord layer and the overlay is dropped.
    database or an HCAL operations spreadsheet.
 3. **Transport.** Import cmscoord as a library (planned), or serve it over MCP as the earlier
    design notes suggested? Deferred until the agent needs it.
-4. **Introducing cmscoord to the project and the other PIs**, before this plan is shared.
+4. **Introducing cmscoord to the other PIs**: the project lead will do this.
 
 ## 7. What this absorbs
 
