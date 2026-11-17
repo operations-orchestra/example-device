@@ -139,8 +139,6 @@ def plot_element(store: RecordStore, element: str, out_path: str | Path,
                 pts = series(box, etype, t0, t1, as_of) if series else []
                 xs = [dt((q["t0"] + q["t1"]) // 2) for q in pts]
                 ax.plot(xs, [q["v"] for q in pts], color=colour, lw=2, label=box)
-                if len(shown) == 1 and pts:
-                    ax.fill_between(xs, [q["lo"] for q in pts], [q["hi"] for q in pts], color=colour, alpha=0.15, lw=0)
                 continue
             if etype == "occupancy_summary":       # one flat segment per run, from the data-quality source
                 for n, r in enumerate(quality(box, t0, t1, as_of) if quality else []):

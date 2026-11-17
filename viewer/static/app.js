@@ -155,12 +155,11 @@ function niceTicks(d0, d1) {
 function yDomain(panel, t0, t1, typical) {
   const vs = [];
   let lo = Infinity, hi = -Infinity;
-  const single = panel.series.length === 1;
   for (const s of panel.series) for (const p of s.points) {
     if (p.t1 < t0 || p.t0 > t1) continue;
     vs.push(p.v);
-    lo = Math.min(lo, single && p.lo != null ? p.lo : p.v);
-    hi = Math.max(hi, single && p.hi != null ? p.hi : p.v);
+    lo = Math.min(lo, p.v);
+    hi = Math.max(hi, p.v);
   }
   if (!vs.length) return [0, 1];
   if (typical) {
@@ -196,15 +195,13 @@ function buildChart(cfg) {
         for (const q of pts) marks += `<line class="line ${cls}" x1="${X(q.t0)}" x2="${X(q.t1)}" y1="${Y(q.v)}" y2="${Y(q.v)}"/>`;
         return;
       }
-      let d = '', prev = null, up = '', down = [];
+      let d = '', prev = null;
       for (const q of pts) {
         const xm = X((q.t0 + q.t1) / 2);
         const gap = prev && q.t0 - prev.t1 > 1.5 * (q.t1 - q.t0);
         d += `${prev && !gap ? 'L' : 'M'}${xm.toFixed(1)},${Y(q.v).toFixed(1)}`;
-        if (p.series.length === 1 && q.lo != null) { up += `${up ? 'L' : 'M'}${xm.toFixed(1)},${Y(q.hi).toFixed(1)}`; down.push(`L${xm.toFixed(1)},${Y(q.lo).toFixed(1)}`); }
         prev = q;
       }
-      if (up) marks += `<path class="band ${cls}" d="${up}${down.reverse().join('')}Z"/>`;
       marks += `<path class="line ${cls}" d="${d}"/>`;
     });
     body += `<g clip-path="url(#${id})">${marks}</g><line class="axis" x1="${L}" x2="${W - R}" y1="${bot}" y2="${bot}"/>`;
@@ -503,6 +500,9 @@ PAGES.detector = async () => {
   const d = await api('map');
   const m = S.meta, n = (k) => d.elements.filter((e) => e.kind === k).length;
   const html = `<h1>The detector</h1>
+  <dl class="facts card about"><dt>This Record covers</dt><dd><b>${tm(m.t0)} to ${tm(m.t1)}</b> UTC (${dur(m.t1 - m.t0)})</dd>
+    <dt>Generated with</dt><dd>preset <b>${esc(m.preset)}</b>, seed ${esc(m.seed)}</dd>
+    <dt>File</dt><dd class="mono">${esc(m.path)} (${m.size_mb} MB, opened read-only) <button data-recfile>load a different Record</button></dd></dl>
   <p class="lead">A synthetic, HCAL-like device: ${n('subdetector')} subdetectors, ${n('readout_box')} readout boxes with ${n('channel')} channels, ${n('lv_supply')} low-voltage supplies and ${n('fed')} FEDs. Everything in the Record is about one of these parts.</p>
   <div class="note"><b>Two things to know first.</b> All of this is invented: real detector names, no real events. And the Record you are browsing was written <b>directly by a generator</b>; none of the software that would build it from real sources runs here. <a href="#/built">How the Record is built</a> explains both.</div>
   <div id="map"></div>
@@ -516,11 +516,7 @@ PAGES.detector = async () => {
     <tr><td>readout box</td><td class="num">${n('readout_box')}</td><td>On-detector electronics for a group of channels. Voltage and temperature are measured per box; the Record keeps their status changes, the full series stay in the source archive.</td></tr>
     <tr><td>channel</td><td class="num">${n('channel')}</td><td>One readout channel. Only flagged when it misbehaves.</td></tr>
     <tr><td>low-voltage supply</td><td class="num">${n('lv_supply')}</td><td>Powers one or more boxes. Has a state: on, off or tripped.</td></tr>
-    <tr><td>FED</td><td class="num">${n('fed')}</td><td>Back-end board that reads out one or more boxes.</td></tr></table></div>
-  <h2>About this Record</h2>
-  <dl class="facts card"><dt>File</dt><dd class="mono">${esc(m.path)} (${m.size_mb} MB, opened read-only) <button data-recfile>load a different Record</button></dd>
-    <dt>Generated with</dt><dd>preset <b>${esc(m.preset)}</b>, seed ${esc(m.seed)}</dd>
-    <dt>Calendar</dt><dd>${tm(m.t0)} to ${tm(m.t1)} UTC</dd></dl>`;
+    <tr><td>FED</td><td class="num">${n('fed')}</td><td>Back-end board that reads out one or more boxes.</td></tr></table></div>`;
   return { html, mount() { $('#map').innerHTML = mapSvg(d, $('#map').clientWidth); } };
 };
 
@@ -848,7 +844,7 @@ PAGES.timeline = async (parts) => {
     : d.boxes.length > 1 ? `<div class="key">${d.boxes.map((b, k) => `<span><i class="c${k + 1}"></i>${esc(b)}</span>`).join('')}</div>` : ''}
   <div id="tl"></div>
   <details open><summary>How to read this</summary>
-  <ul><li><b>Voltage and temperature are not stored in the Record.</b> They are fetched from the source archive for the range in view. Zoomed out, each drawn point averages many samples and the light band (shown for a single box) is their minimum to maximum; zoom in far enough and every sample is drawn. <a href="#/built">Why the Record does not keep them.</a></li>
+  <ul><li><b>Voltage and temperature are not stored in the Record.</b> They are fetched from the source archive for the range in view. Zoomed out, each drawn point is the mean of the samples it covers; zoom in far enough and every sample is drawn. <a href="#/built">Why the Record does not keep them.</a></li>
   <li><b>Reading status</b> is what the Record keeps instead: one entry each time a box's reading changes status (drifting, low, high, off, back to normal). Each bar runs from one change to the next.</li>
   <li><b>Dead channels, hot channels and occupancy</b> are per-run numbers, also fetched from a source (the data-quality archive), drawn as a flat segment across each run. The Record keeps only <b>quality status</b> changes.</li>
   <li><b>Not certified yet</b>: runs whose certification is not complete for the subdetector. Once it is, a lumisection is good unless a <b>certified bad</b> range covers it; good is not stored.</li>
