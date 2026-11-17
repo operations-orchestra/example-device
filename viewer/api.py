@@ -19,6 +19,8 @@ from aggregator import TABLES, RecordStore, StoredEntry
 from utils import to_iso
 from aggregator.view import scope
 
+from orchestrator.agent import ScriptedBrain, diagnose, trigger_for
+
 from . import precedents as prec
 
 
@@ -580,6 +582,24 @@ def _archive_summary(archive) -> Optional[dict]:
             "bytes": sum((archive.dir / c["file"]).stat().st_size for c in chans)}
 
 
+def agent(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """What the scripted agent would propose for the problem being replayed, at this moment."""
+    as_of = _as_of(q)
+    iid = _int(q, "id", required=True)
+    trig = trigger_for(store, iid, as_of)
+    if trig is None:
+        return {"trigger": None, "message": "No symptom of this problem is on record yet: there is nothing to ask about."}
+    r = diagnose(trig, ScriptedBrain(), store, ctx.get("archive"))
+    p = r["proposal"]
+    cited = {}
+    for c in p.supporting + p.conflicting:
+        e = store.get_entry(c.entry_id, as_of)
+        if e:
+            cited[c.entry_id] = _e(e)
+    return {"trigger": asdict(trig), "proposal": asdict(p), "log": r["log"].as_dicts(), "problems": r["problems"],
+            "accepted": r["accepted"], "settings": r["settings"].describe(), "learned": r["learned"], "cited": cited}
+
+
 def built(store: RecordStore, q: dict, ctx: dict) -> dict:
     """Real rows used as worked examples on the 'how the Record is built' page."""
     as_of = _as_of(q)
@@ -657,7 +677,7 @@ ROUTES: dict[str, Callable[[RecordStore, dict, dict], dict]] = {
     "meta": meta, "next_known": next_known, "overview": overview, "elements": elements,
     "entries": entries, "entry": entry, "incidents": incidents, "incident": incident,
     "timeline": timeline, "tables": tables, "map": detector_map, "diff": diff, "precedents": precedents, "read": read,
-    "replay": replay, "built": built, "interfaces": interfaces, "demo/planted": demo_planted, "demo/device": demo_device,
+    "replay": replay, "built": built, "interfaces": interfaces, "agent": agent, "demo/planted": demo_planted, "demo/device": demo_device,
 }
 # Endpoints that may be called without as_of, and why (see the module docstring).
 NO_AS_OF = {"meta", "next_known", "demo/planted", "demo/device"}

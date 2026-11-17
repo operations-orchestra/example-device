@@ -588,6 +588,30 @@ class _Gen:
                 self.box_sync_loss(f)
             self.planted[-1]["entry_ids"] = sorted(set(self.touched))
 
+    def review_precedents(self) -> None:
+        """Invented expert reviews: was an earlier incident a precedent of a later one?
+
+        Written when the later incident is closed. Same planted fault: confirmed. A different
+        fault that shares a part: rejected. Pairs that share neither are never reviewed.
+        """
+        end = 2 ** 62
+        cases = [c for c in self.planted if c["incident_id"]]
+        parts = {c["incident_id"]: {r.element for r in self.store.parts(end, incident_id=c["incident_id"])} for c in cases}
+        for later in cases:
+            inc = self.store.incident(later["incident_id"], end)
+            closed = self.store._db.execute("SELECT closed_known_at FROM incident WHERE id = ?",
+                                            (inc.id,)).fetchone()[0]
+            for earlier in cases:
+                if earlier["t_event"] >= later["t_event"]:
+                    continue
+                shared = parts[inc.id] & parts[earlier["incident_id"]]
+                if earlier["mode"] == later["mode"]:
+                    self.store.add_precedent_review(inc.id, earlier["incident_id"], "confirmed", closed, PRODUCER, VERSION,
+                                                    "invented review: the same planted fault")
+                elif shared:
+                    self.store.add_precedent_review(inc.id, earlier["incident_id"], "rejected", closed, PRODUCER, VERSION,
+                                                    f"invented review: shares {', '.join(sorted(shared))} but a different fault")
+
     def finish_planted(self) -> None:
         """Work out, from the Record itself, what an honest answer is at each ask time."""
         for p in self.planted:
@@ -643,6 +667,7 @@ def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dic
     gen.background()
     gen.run_faults()
     gen.finish_planted()
+    gen.review_precedents()
     counts = store.counts()["tables"]
     store.close()
 

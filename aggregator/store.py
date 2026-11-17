@@ -203,6 +203,16 @@ class RecordStore:
             (entry_id, incident_id, self._eid(element), role, known_at, producer, producer_version, status))
         return cur.lastrowid
 
+    def add_precedent_review(self, incident_id: int, earlier_id: int, status: str, known_at: int,
+                             producer: str, producer_version: str = "", note: str = "") -> int:
+        """A person's verdict that ``earlier_id`` was (or was not) a precedent of ``incident_id``."""
+        if status not in ("confirmed", "rejected"):
+            raise ValueError("status must be 'confirmed' or 'rejected'")
+        cur = self._db.execute(
+            "INSERT INTO precedent (incident_id, earlier_id, status, known_at, producer, producer_version, note) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)", (incident_id, earlier_id, status, known_at, producer, producer_version, note))
+        return cur.lastrowid
+
     # -- the calendar --------------------------------------------------------------------
     def add_fill(self, number: int, t_start: int, t_end: int, end_known_at: Optional[int] = None) -> None:
         self._db.execute("INSERT INTO fill (number, t_start, t_end, end_known_at) VALUES (?, ?, ?, ?)",
@@ -548,6 +558,14 @@ class RecordStore:
             "ORDER BY r.known_at, r.id", (value, as_of))
         return [PartRef(*r) for r in rows]
 
+    def precedent_reviews(self, as_of: int, incident_id: Optional[int] = None) -> list[dict[str, Any]]:
+        """Precedent reviews known by ``as_of`` (all, or those about one incident)."""
+        sql = ("SELECT id, incident_id, earlier_id, status, known_at, producer, note FROM precedent WHERE known_at <= ?"
+               + (" AND incident_id = ?" if incident_id is not None else "") + " ORDER BY known_at, id")
+        params = (as_of, incident_id) if incident_id is not None else (as_of,)
+        return [dict(zip(("id", "incident_id", "earlier_id", "status", "known_at", "producer", "note"), r))
+                for r in self._db.execute(sql, params)]
+
     def runs(self, as_of: int, t0: Optional[int] = None, t1: Optional[int] = None) -> list[dict[str, Any]]:
         """Runs started by ``as_of`` (overlapping [t0, t1] if given). End fields are None until known."""
         rows = self._db.execute(
@@ -742,6 +760,7 @@ class RecordStore:
             "run": one("SELECT COUNT(*) FROM run WHERE t_start <= ?", as_of),
             "beam_mode": one("SELECT COUNT(*) FROM beam_mode WHERE t_start <= ?", as_of),
             "certification": one("SELECT COUNT(*) FROM certification WHERE completed_at <= ?", as_of),
+            "precedent": one("SELECT COUNT(*) FROM precedent WHERE known_at <= ?", as_of),
             "query_log": one("SELECT COUNT(*) FROM query_log"),
             "meta": one("SELECT COUNT(*) FROM meta"),
         }
@@ -771,6 +790,7 @@ class RecordStore:
                     (as_of, as_of, as_of, as_of, limit)),
             "beam_mode": ("SELECT * FROM beam_mode WHERE t_start <= ? ORDER BY t_start LIMIT ?", (as_of, limit)),
             "certification": ("SELECT * FROM certification WHERE completed_at <= ? ORDER BY run LIMIT ?", (as_of, limit)),
+            "precedent": ("SELECT * FROM precedent WHERE known_at <= ? ORDER BY known_at LIMIT ?", (as_of, limit)),
             "meta": ("SELECT * FROM meta WHERE key <> 'config' ORDER BY key LIMIT ?", (limit + 4,)),
         }
         if table not in queries:
@@ -813,6 +833,7 @@ class RecordStore:
             "SELECT MAX(m) FROM (SELECT MAX(known_at) AS m FROM entry "
             "UNION ALL SELECT MAX(known_at) FROM part_ref "
             "UNION ALL SELECT MAX(completed_at) FROM certification "
+            "UNION ALL SELECT MAX(known_at) FROM precedent "
             "UNION ALL SELECT MAX(end_known_at) FROM run "
             "UNION ALL SELECT MAX(known_at) FROM link "
             "UNION ALL SELECT MAX(known_at) FROM incident_entry "
@@ -834,7 +855,7 @@ class RecordStore:
     def counts(self) -> dict[str, Any]:
         tables = {t: self._db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
                   for t in ("element", "element_relation", "entry", "part_ref", "link", "incident",
-                            "incident_entry", "fill", "run", "beam_mode", "certification", "query_log")}
+                            "incident_entry", "precedent", "fill", "run", "beam_mode", "certification", "query_log")}
         by_type = [tuple(r) for r in self._db.execute(
             "SELECT record_class, source, type, kind, COUNT(*) FROM entry "
             "GROUP BY record_class, source, type, kind ORDER BY record_class, source, type")]
@@ -847,7 +868,7 @@ class RecordStore:
 
         h = hashlib.sha256()
         for table in ("meta", "element", "element_relation", "entry", "link", "incident", "incident_entry",
-                      "part_ref", "fill", "run", "beam_mode", "certification"):
+                      "part_ref", "precedent", "fill", "run", "beam_mode", "certification"):
             for row in sorted(repr(r) for r in self._db.execute(f"SELECT * FROM {table}")):
                 h.update(row.encode())
         return h.hexdigest()

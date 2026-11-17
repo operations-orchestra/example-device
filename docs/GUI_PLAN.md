@@ -406,3 +406,8 @@ clicking through a replay (step, Play, jumps, Exit), drag-to-zoom, and the answe
   step reached shows what it taught; later steps show nothing but their time.
 - **Timestamps** are shown short ("Mar 12 02:00", no year, no seconds); hovering one shows the
   full UTC time. Chart labels and tooltips use the short form.
+- **The agent in Replay.** A panel "What the agent would say at this moment" shows the verdict,
+  the confidence against the two thresholds, the next step, the part, the diagnosis, every
+  earlier incident recalled with how its confidence was reached, the evidence it cites (each
+  with the logged call that returned it), and every tool call. The answer key, when revealed,
+  shows the honest answer beside it.

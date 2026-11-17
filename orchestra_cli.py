@@ -5,6 +5,8 @@
     orchestra show  INCIDENT_ID [--as-of TIME]
     orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
     orchestra view  [--db out/record.db] [--port 8765]
+    orchestra ask   INCIDENT [--as-of TIME] [--db FILE] [--model-url URL --model NAME]
+    orchestra demo  [--db FILE]
 
 TIME looks like 2040-03-02T01:05 (UTC).
 """
@@ -101,6 +103,77 @@ def _view(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_answer(store, result) -> None:
+    from utils import to_iso
+
+    p = result["proposal"]
+    print(f"  verdict      {p.verdict}  (confidence {p.confidence:.2f}, {p.brain} brain)")
+    print(f"  next step    {p.next_step.replace('_', ' ')}")
+    print(f"  part         {p.element}")
+    print(f"  diagnosis    {p.diagnosis}")
+    for c in p.candidates[:3]:
+        print(f"  candidate    #{c['id']} {c['title']}: {c['signature']} match, {c['confidence']:.2f}")
+        for s in c["steps"]:
+            print(f"                 {s}")
+    for c in p.supporting:
+        e = store.get_entry(c.entry_id, result["log"].calls[c.query_id - 1].as_of)
+        print(f"  cites        entry {c.entry_id} via query {c.query_id} ({c.why}): {e.type} {e.element} {to_iso(e.t_start)}")
+    for n in p.notes:
+        print(f"  note         {n}")
+    print(f"  tool calls   " + "; ".join(f"{c.id}:{c.tool}" for c in result["log"].calls))
+    print(f"  check        " + ("passed" if result["accepted"] else "REJECTED: " + "; ".join(result["problems"])))
+
+
+def _brain(args):
+    from orchestrator.agent import ModelBrain, ScriptedBrain
+
+    if getattr(args, "model_url", None):
+        import os
+        return ModelBrain(args.model_url, args.model, os.environ.get("ORCHESTRA_API_KEY", ""))
+    return ScriptedBrain()
+
+
+def _ask(args: argparse.Namespace) -> int:
+    from adapters.control_archive import ControlArchive
+    from orchestrator.agent import diagnose, trigger_for
+    from viewer.precedents import first_ask_time
+
+    store = _open(args)
+    as_of = from_iso(args.as_of) if args.as_of else first_ask_time(store, args.incident)
+    trig = trigger_for(store, args.incident, as_of)
+    if trig is None:
+        print("No symptom of that problem is on record at that moment.", file=sys.stderr)
+        return 1
+    print(f"Q: {trig.question}")
+    _print_answer(store, diagnose(trig, _brain(args), store, ControlArchive.find(args.db)))
+    return 0
+
+
+def _demo(args: argparse.Namespace) -> int:
+    """The proposal's Fig. 2 story on the synthetic Record: one problem met twice."""
+    import json
+
+    from adapters.control_archive import ControlArchive
+    from orchestrator.agent import ScriptedBrain, diagnose, trigger_for
+    from utils import to_iso
+
+    store, archive = _open(args), ControlArchive.find(args.db)
+    planted = json.loads((Path(args.db).parent / "planted.json").read_text())["planted"]
+    first, second = [c for c in planted if c["mode"] == "configure_failure"][:2]
+    end = store.latest_known_at()
+    cases = [("1. Crew 1 meets a new problem", first, first["ask_at"]),
+             ("2. Crew 2 meets it again, the next fill", second, second["ask_at"]),
+             ("3. The same question, after the experts closed both incidents", second, end)]
+    print("SYNTHETIC, NOT CMS DATA. Scripted brain: a fixed procedure, no language model.\n")
+    for title, case, as_of in cases:
+        trig = trigger_for(store, case["incident_id"], as_of)
+        print(f"{title}  (as of {to_iso(as_of)})")
+        print(f"Q: {trig.question}")
+        _print_answer(store, diagnose(trig, ScriptedBrain(), store, archive))
+        print()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orchestra", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -138,6 +211,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--db", default="out/record.db")
     p.add_argument("--port", type=int, default=8765)
     p.set_defaults(func=_view)
+
+    p = reader("ask", "ask the agent about a problem, as of a moment")
+    p.add_argument("incident", type=int, help="the incident whose symptoms the crew is looking at")
+    p.add_argument("--model-url", help="an OpenAI-compatible endpoint; without it the scripted brain answers")
+    p.add_argument("--model", default="", help="model name for --model-url")
+    p.set_defaults(func=_ask)
+
+    p = reader("demo", "the Fig. 2 story: one problem met twice")
+    p.set_defaults(func=_demo)
 
     args = parser.parse_args(argv)
     return args.func(args)

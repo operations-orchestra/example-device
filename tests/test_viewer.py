@@ -153,7 +153,7 @@ def test_tables_page_shows_raw_rows_only_as_known(call, tiny, store):
     status, body = call("tables", as_of=as_of, incident=first["incident_id"])
     assert status == 200 and [t["name"] for t in body["tables"]] == [
         "element", "element_relation", "entry", "part_ref", "link", "incident", "incident_entry",
-        "fill", "run", "beam_mode", "certification", "query_log", "meta"]
+        "precedent", "fill", "run", "beam_mode", "certification", "query_log", "meta"]
     by_name = {t["name"]: t for t in body["tables"]}
     assert by_name["entry"]["count"] == store.count_entries(as_of) < store.count_entries(store.latest_known_at())
     for name in ("entry", "link", "incident", "incident_entry"):

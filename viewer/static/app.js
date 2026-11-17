@@ -373,7 +373,7 @@ function mapHeader(d) {
 
 /* --------------------------------------------------------------- tables */
 const ER_POS = { element: [20, 20], element_relation: [20, 150], part_ref: [20, 290], entry: [290, 20], incident: [290, 330],
-  link: [570, 20], incident_entry: [570, 250], certification: [570, 380], run: [850, 20], fill: [850, 180], beam_mode: [850, 300], query_log: [850, 400], meta: [850, 540] };
+  link: [570, 20], incident_entry: [570, 250], precedent: [570, 380], certification: [570, 580], run: [850, 20], fill: [850, 180], beam_mode: [850, 300], query_log: [850, 400], meta: [850, 540] };
 function erDiagram(tables) {
   const BW = 210, HH = 26, RH = 16;
   const idx = Object.fromEntries(tables.map((t) => [t.name, t]));
@@ -1000,6 +1000,7 @@ PAGES.replay = async () => {
       : `<p>Nothing yet as an incident. ${d.entries.length} symptom entries are on record, but nobody has grouped them: the incident is opened at ${tm(f.opened_at)}.</p>`}</div>
   <div class="card"><b>Learned in the last step</b>
     ${d.learned ? ((d.learned.changes.length || d.learned.entries.length) ? '<ul>' + d.learned.changes.map((c) => `<li>${esc(c.what)}</li>`).join('') + d.learned.entries.map((e) => `<li>entry ${entryLink(e.id)}: ${esc(describe(e))}</li>`).join('') + '</ul>' : '<p class="muted">Entries already on record were attached to the incident.</p>') : '<p class="muted">Press "next step".</p>'}</div></div>
+  <div id="agent-panel" class="agent"><b>What the agent would say at this moment</b> <span class="muted small">asking…</span></div>
   <details ${RS.parts ? 'open' : ''} data-rs="parts"><summary><b>Parts this problem concerns, as known now</b> (${(d.parts || []).length})</summary>${partsTable(d.parts)}</details>
   ${replaySections(f.element)}
   <details ${RS.seen ? 'open' : ''} data-rs="seen"><summary><b>Has this been seen before?</b> ${p.same_element.length} on a shared part, ${p.same_symptom.length} with the same kind of symptom</summary>
@@ -1015,8 +1016,43 @@ PAGES.replay = async () => {
     $('#know').innerHTML = knowledgeChart({ t_start: f.t_start }, d.entries, $('#know').clientWidth, r.steps, d.step_notes);
     if ($('#rvd')) $('#rvd').addEventListener('toggle', (ev) => { S.reveal = ev.target.open; });
     mountReplaySections(f.element);
+    mountAgent(r.id, caseFor);
   } };
 };
+const VERDICT_CLS = { known: 'v-known', uncertain: 'v-uncertain', new: 'v-new' };
+async function mountAgent(iid, caseFor) {
+  const host = $('#agent-panel');
+  if (!host) return;
+  let a;
+  try { a = await api('agent', { id: iid }); } catch (e) { host.innerHTML = `<b>What the agent would say at this moment</b><p>${esc(e.message)}</p>`; return; }
+  if (!a.trigger) { host.innerHTML = `<b>What the agent would say at this moment</b><p class="muted">${esc(a.message)}</p>`; return; }
+  const p = a.proposal, cited = a.cited, log = a.log;
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const bar = (x) => `<span class="cbar"><span style="width:${pct(x)}"></span><i style="left:${pct(a.settings.new_below)}"></i><i style="left:${pct(a.settings.known_at_least)}"></i></span>`;
+  const call = (qid) => log[qid - 1];
+  const argText = (c) => Object.entries(c.args).map(([k, v]) => `${k}=${Array.isArray(v) ? '[' + v.join(', ') + ']' : (['t', 't0', 't1', 'before'].includes(k) ? fmt(v) : v)}`).join(', ');
+  host.innerHTML = `<div class="agent-head"><b>What the agent would say at this moment</b>
+      <span class="muted small">${p.brain} brain: a fixed procedure, no language model${a.accepted ? '' : ' · <b class="bad-text">rejected by the check</b>'}</span></div>
+    <p class="muted small">Asked: "${esc(a.trigger.question)}"</p>
+    <div class="verdict-row"><span class="verdict ${VERDICT_CLS[p.verdict]}">${p.verdict}</span> ${bar(p.confidence)} <b>${pct(p.confidence)}</b>
+      <span>next step: <b>${p.next_step.replace('_', ' ')}</b></span><span>part: ${elLink(p.element)}</span>
+      ${p.precedent ? `<span>precedent: ${incLink(p.precedent)}</span>` : ''}</div>
+    <p>${esc(p.diagnosis)}</p>
+    ${p.notes.map((n) => `<p class="small muted">${esc(n)}</p>`).join('')}
+    ${a.problems.length ? `<p class="bad-text small">${a.problems.map(esc).join('<br>')}</p>` : ''}
+    <details ${p.candidates.length ? 'open' : ''}><summary><b>Earlier incidents recalled</b> (${p.candidates.length}) and how sure it is about each</summary>
+      ${p.candidates.length ? `<div class="tablewrap"><table><tr><th>#</th><th>Title</th><th>Match</th><th>Confidence</th><th>How it was reached</th><th>What was done then</th></tr>
+      ${p.candidates.map((c) => `<tr><td>${incLink(c.id)}</td><td>${esc(c.title)}</td><td>${c.signature === 'both' ? 'shared part and symptom' : c.signature === 'symptom' ? 'same symptom' : 'shared part'}<br><span class="small muted">${[...c.shared_parts, ...c.shared_kinds].map(esc).join(', ')}</span></td>
+        <td class="t">${bar(c.confidence)} ${pct(c.confidence)}</td><td class="small">${c.steps.map(esc).join('<br>')}</td><td class="what small">${c.recovery_action ? esc(c.recovery_action) : empty()}</td></tr>`).join('')}</table></div>`
+        : '<p class="muted">None share a part or a kind of symptom with this problem.</p>'}
+      <p class="small muted">Verdict: known from ${pct(a.settings.known_at_least)}, new below ${pct(a.settings.new_below)}. Reviews learned from so far: ${Object.entries(a.learned).map(([k, v]) => `${k} ${v.confirmed} confirmed / ${v.rejected} rejected`).join('; ')}.</p></details>
+    <details><summary><b>Evidence it cites</b> (${p.supporting.length}): each entry came back from a logged tool call</summary>
+      <div class="tablewrap"><table><tr><th>Why</th><th>Entry</th><th>What</th><th>Returned by</th></tr>${p.supporting.map((c) => `<tr><td class="small">${esc(c.why)}</td><td>${entryLink(c.entry_id)}</td>
+        <td class="what small">${cited[c.entry_id] ? esc(cited[c.entry_id].short) : ''}</td><td class="small">query ${c.query_id}: ${esc(call(c.query_id).tool)}</td></tr>`).join('')}</table></div></details>
+    <details><summary><b>Tool calls</b> (${log.length}), all as of ${fmt(a.trigger.as_of)}</summary>
+      <ol class="calls">${log.map((c) => `<li><span class="mono">${esc(c.tool)}(${esc(argText(c))})</span><br><span class="small">${esc(c.summary)}</span></li>`).join('')}</ol></details>
+    ${S.reveal && caseFor ? `<div class="note keynote small"><b>Answer key:</b> the honest answer when the crew first asks is ${esc(caseFor.expected.verdict)}, ${esc(caseFor.expected.next_step.replace(/_/g, ' '))}.</div>` : ''}`;
+}
 /* Collapsible views inside the replay page. They are the same drawings as the full pages,
    fed with the same as-of data. */
 const RS = { map: false, tl: false, seen: true, entries: false, parts: true, view: null, viewFor: null };

@@ -209,6 +209,33 @@ lead's review of the synthetic data with it (open questions 1 and 2), then secti
 
 Agreed design, not built.
 
+### 6.0 Built on 17 November 2026
+
+The agent now runs. What was built, and how it differs from the design below:
+
+- **Six tools, not five** (`orchestrator/tools.py`): `search_incidents`, `get_incident`, `state`,
+  `events`, `co_occurring`, and `series`, which fetches a reading from the source archive
+  because readings are no longer in the Record. All are read-only, all are made as of the
+  moment of the question, and every call goes into a query log. The log is kept in memory for
+  the session; the GUI's Record is read-only, so it is not written to `query_log`.
+- **"Known" is a confidence, not a rule** (`orchestrator/confidence.py`), decided by the
+  project lead. For each recalled incident: a starting value learned from past precedent
+  reviews with the same match signature (shares a part, same kind of symptom, or both),
+  smoothed by an expert prior; then the odds are multiplied by 3 for each thing the earlier
+  incident's experts relied on that is found again now. Known from 0.7, new below 0.3. The
+  reviews are a new table, `precedent`; in the demo the generator writes them (same planted
+  fault: confirmed; a different fault sharing a part: rejected), known when the later
+  incident is closed.
+- **The scripted brain** (`orchestrator/agent.py`): looks at the symptoms, recalls, opens each
+  candidate, checks the states of its suspected and cause parts, looks at what happened in the
+  12 hours before, fetches a supply's voltage when one is involved, and fills in the proposal.
+  On the `small` Record it matches the answer key on 21 of 23 planted cases; the two others are
+  early hot-channel recurrences it calls "uncertain" before enough reviews have accumulated.
+- **The model brain** speaks the OpenAI-compatible tool-calling protocol; tested against a fake
+  endpoint only. `orchestra ask N --model-url URL --model NAME` uses it.
+- **The check** rejects any citation that no logged call returned, and "known" without a
+  precedent.
+
 ### 6.1 Query tools (`orchestrator/tools.py`)
 
 Typed, read-only, and the only way the agent touches the Record. No raw SQL tool.

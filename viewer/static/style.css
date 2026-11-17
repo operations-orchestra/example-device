@@ -178,3 +178,12 @@ svg .hlabel { fill: var(--ink2); font-size: 10.5px; } svg .hlabel.fresh { fill: 
 svg .leader { stroke: var(--axis); stroke-width: 1; }
 .stepnow { background: var(--surface); border: 1px solid var(--grid); border-left: 4px solid var(--accent); border-radius: 0 6px 6px 0; padding: 6px 12px; }
 .ts { white-space: nowrap; border-bottom: 1px dotted var(--axis); cursor: help; }
+.agent { background: var(--surface); border: 1px solid var(--grid); border-left: 4px solid var(--s3); border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 14px 0; }
+.agent-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.verdict-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.verdict { font-weight: 700; text-transform: uppercase; font-size: 12px; border-radius: 4px; padding: 2px 8px; color: #fff; }
+.v-known { background: var(--s3); } .v-uncertain { background: var(--warn); color: #0b0b0b; } .v-new { background: var(--s1); }
+.cbar { display: inline-block; position: relative; width: 120px; height: 8px; background: var(--grid); border-radius: 4px; vertical-align: middle; }
+.cbar > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink2); border-radius: 4px; }
+.cbar > i { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--muted); }
+.bad-text { color: var(--critical); } ol.calls li { margin: 4px 0; }

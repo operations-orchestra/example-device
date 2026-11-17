@@ -18,19 +18,9 @@ from typing import Any, Optional
 
 from aggregator import RecordStore, StoredEntry
 
+from orchestrator.recall import symptom_kind  # noqa: E402  (one definition, shared with the agent)
+
 ASK_DELAY_S = 5 * 60          # the crew asks five minutes after the first symptom is on record
-_GENERIC = {"shift_note"}     # every incident has logbook notes; they do not characterise a symptom
-_QUALIFIERS = ("result", "value", "flag", "state")
-
-
-def symptom_kind(entry: StoredEntry) -> Optional[str]:
-    """A short label for what kind of symptom an entry is, e.g. 'configure:failed'."""
-    if entry.type in _GENERIC:
-        return None
-    for key in _QUALIFIERS:
-        if key in entry.payload:
-            return f"{entry.type}:{entry.payload[key]}"
-    return entry.type
 
 
 def _symptoms(store: RecordStore, incident_id: int, as_of: int) -> list[StoredEntry]:

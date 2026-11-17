@@ -172,3 +172,19 @@ CREATE TABLE part_ref (
 CREATE INDEX part_ref_element ON part_ref (element_id, known_at);
 CREATE INDEX part_ref_entry ON part_ref (entry_id);
 CREATE INDEX part_ref_incident ON part_ref (incident_id);
+
+-- ------------------------------------------------------------- precedent reviews
+-- A person's verdict that an earlier incident was (or was not) a precedent of a later one:
+-- its recovery or cause applies. These are the counts the agent's confidence learns from.
+CREATE TABLE precedent (
+    id               INTEGER PRIMARY KEY,
+    incident_id      INTEGER NOT NULL REFERENCES incident (id),
+    earlier_id       INTEGER NOT NULL REFERENCES incident (id),
+    status           TEXT NOT NULL CHECK (status IN ('confirmed', 'rejected')),
+    known_at         INTEGER NOT NULL,
+    producer         TEXT NOT NULL,
+    producer_version TEXT NOT NULL,
+    note             TEXT NOT NULL,
+    CHECK (incident_id <> earlier_id)
+);
+CREATE INDEX precedent_incident ON precedent (incident_id);
