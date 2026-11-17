@@ -531,6 +531,7 @@ def built(store: RecordStore, q: dict, ctx: dict) -> dict:
                          "note": _e(note) if note else None},
             "incident_example": example, "source": source_spots(),
             "archive": _archive_summary(ctx.get("archive")),
+            "status_rules": json.loads(store.meta().get("status_rules", "{}")),
             "share": {"status": sum(n for _, _, t, _, n in by_type if t.endswith("_status")),
                       "total": sum(n for *_, n in by_type)},
             "links": {"direct": _link_example(store, as_of, "downtime", "direct"),

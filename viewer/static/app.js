@@ -442,21 +442,22 @@ function knowledgeChart(inc, entries, width, steps) {
 const PAGES = {};
 const NAV = [
   ['1', 'detector', 'The detector'],
-  ['2', 'built', 'How the Record is built', [['built', 'Overview'], ['interfaces', 'Interfaces of unbuilt parts']]],
+  ['2', 'built', 'How the Record is built', [['built', 'Overview'], ['interfaces', 'Interfaces of unbuilt parts']], true],
   ['3', 'tables', 'What is in the Record', [['tables', 'Tables'], ['record', 'Entries'], ['incidents', 'Incidents'], ['timeline', 'Timeline']]],
-  ['4', 'scenarios', 'Scenarios in this demo'],
+  ['4', 'scenarios', 'Scenarios in this demo', null, true],
   ['5', 'replay', 'Replay'],
 ];
 const ALIAS = { entry: 'record', incident: 'incidents' };
 function drawNav(current) {
   const cur = ALIAS[current] || current;
-  $('#nav').innerHTML = NAV.map(([n, key, label, subs]) => {
+  $('#nav').innerHTML = NAV.map(([n, key, label, subs, demo]) => {
     const on = cur === key || (subs && subs.some(([k]) => k === cur));
-    return `<a href="#/${key}" class="navtop${on && !subs ? ' on' : ''}"><span class="n">${n}</span>${label}</a>` +
+    return `<a href="#/${key}" class="navtop${on && !subs ? ' on' : ''}${demo ? ' demo' : ''}" ${demo ? 'title="Demo explainer: not part of the production Record browser"' : ''}><span class="n">${n}</span>${label}</a>` +
       (subs ? `<div class="subs">${subs.map(([k, l]) => `<a href="#/${k}" class="${cur === k ? 'on' : ''}">${l}</a>`).join('')}</div>` : '');
-  }).join('') + '<div class="navfoot"><a href="#/api">For developers: read API</a></div>';
+  }).join('') + '<div class="navfoot"><span class="demo-key"></span> demo explainer, not part of the production Record browser<br><br><a href="#/api">For developers: read API</a></div>';
 }
 
+const EXPLAINER = (what) => `<div class="explainer"><b>Demo explainer, not part of the production Record browser.</b> ${what}</div>`;
 /* 1. the detector ------------------------------------------------------------------ */
 PAGES.detector = async () => {
   const d = await api('map');
@@ -496,7 +497,8 @@ PAGES.built = async () => {
   const inc = d.incident_example;
   const row = (what, demo, example, feed) => `<tr><td>${what}</td><td>${demo}</td><td class="what">${example}</td><td>${feed}</td></tr>`;
   const head = '<tr><th>What</th><th>What the demo does</th><th>Example from this Record</th><th>What the feed would do instead</th></tr>';
-  const html = `<h1>How the Record is built</h1>
+  const html = `${EXPLAINER('Most of this page is written by hand to describe this demo; only the examples are read from the loaded Record, so the rest can drift from it.')}
+  <h1>How the Record is built</h1>
   <div class="note"><b>The message of this page.</b>
     <ol><li>On a real detector, a chain of software called the feed builds the Record from existing systems. <b>That chain does not exist here.</b></li>
     <li>A <b>generator</b> stands in for all of it: it invents a detector history and writes finished entries, links and incidents straight into the Record.</li>
@@ -515,22 +517,9 @@ PAGES.built = async () => {
   <div class="key"><span><i class="k-off"></i>dashed: not built; click for its interface</span><span><i class="k-real"></i>blue: runs here</span><span><i class="k-demo"></i>violet: the generator, demo only</span></div>
 
   <h2>How time series are treated</h2>
-  <p><b>The Record keeps what changed, not the samples.</b> A reading's full series stays in the source; the Record gets one entry each time the reading changes status, with a pointer back; anyone who needs the series fetches it from the source.</p>
-  <div class="flow ts">
-    <div class="box src"><b>Source archive</b>every sample, kept by the existing system</div><span class="arrow">&#8594;</span>
-    <div class="box"><b>Status rule</b>normal, drifting, low, high, off</div><span class="arrow">&#8594;</span>
-    <a class="box real" href="#/record"><b>The Record</b>one entry per change, with a pointer</a>
-    <span class="arrow">&#8592;</span><div class="box real"><b>Timeline, agent</b>read the Record</div></div>
-  <div class="flow ts"><div class="box src"><b>Source archive</b></div><span class="arrow">&#8592;</span>
-    <div class="box real"><b>Adapter</b>fetches a series on demand, as of a moment${code('adapter')}</div><span class="arrow">&#8592;</span>
-    <div class="box real"><b>Timeline, agent</b>need the series itself</div></div>
+  <p><b>The Record keeps what changed, not the samples.</b> The full series stays in the source; the Record stores one entry each time a reading changes status, with a pointer back.</p>
+  ${Object.keys(d.status_rules || {}).length ? `<p><b>The status rule</b> used for this Record${code('status_rule', 'rule')}:</p><ul class="rules">${Object.entries(d.status_rules || {}).map(([q, r]) => `<li><b>${esc(q.replace('_', ' '))}</b>: ${esc(r)}</li>`).join('')}</ul>` : ''}
   <div id="ts-demo"></div>
-  <div class="tablewrap"><table><tr><th>Option for bulk series</th><th>Used?</th><th>Here</th></tr>
-    <tr><td><b>1. Keep series out of the entry table</b></td><td>yes, as a stand-in</td><td>The demo's archive plays the source system, so there is something to fetch.</td></tr>
-    <tr><td><b>2. Record changes, not samples</b></td><td>yes</td><td>The status rule above. What it misses is only in the source.</td></tr>
-    <tr><td><b>3. Fine detail only where it matters</b></td><td>not yet</td><td>A coarse baseline everywhere may be needed for anticipation (Q2), which looks at normal periods.</td></tr>
-    <tr><td><b>4. Fetch from the source on demand</b></td><td>yes</td><td>The adapter; nothing is copied into the Record.</td></tr></table></div>
-
   <div class="genbox">
   <h2>What the generator does in place of the feed</h2>
   <p>It first lays out a calendar of fills and runs and decides where each <a href="#/scenarios">planted situation</a> goes${code('calendar')}. Then it writes the Record through the aggregator${code('write')}. Each row below shows one thing it writes, with a real example.</p>
@@ -578,15 +567,13 @@ async function tsIllustration(e, cad) {
   const [tl, rec] = await Promise.all([api('timeline', { element: e.element, t0, t1 }),
     api('entries', { element: e.element, type: e.type, t0, t1, limit: 50 })]);
   const panel = tl.panels.find((p) => p.type === 'lv_voltage');
-  const status = tl.strip.find((r) => r.row === 'Reading status');
-  const cfg = { t0, t1, width: host.clientWidth, panels: [{ ...panel, label: `${e.element} low voltage, from the source archive`, series: panel.series.filter((x) => x.box === e.element) }],
-    rows: [{ label: 'In the Record', items: rec.entries.map((x) => ({ t0: x.t_start, shape: 'diamond', cls: x.payload.value === 'normal' ? 'mk' : 'mk crit', tip: `${fmt(x.t_start)}\n${x.payload.value} (recorded ${fmt(x.known_at)})`, go: `#/entry/${x.id}` })) },
-      { label: 'Reading status', items: status.items.filter((it) => it.text.startsWith(`${e.element} low voltage`)).map((it) => ({ t0: it.t0, t1: it.t1 ?? null, cls: STATUS_CLS[it.value] || 'warn', tip: it.text, go: `#/entry/${it.id}` })) }],
+  const cfg = { t0, t1, width: host.clientWidth, panels: [{ ...panel, label: `Fetched: ${e.element} low voltage, every sample, from the source archive`, series: panel.series.filter((x) => x.box === e.element) }],
+    rows: [{ label: 'Stored', items: rec.entries.map((x) => ({ t0: x.t_start, shape: 'diamond', cls: x.payload.value === 'normal' ? 'mk' : 'mk crit', tip: `${fmt(x.t_start)}\n${x.payload.value} (recorded ${fmt(x.known_at)})`, go: `#/entry/${x.id}` })) }],
     aria: 'one voltage series from the archive, and the few entries the Record keeps for it' };
   const chart = buildChart(cfg);
   const samples = Math.round((t1 - t0) / cad);
-  host.innerHTML = `<p class="small muted">A real example from this demo: ${samples.toLocaleString()} samples of one box's voltage over 10 hours, and the ${rec.total} entries the Record keeps for them. Hover a diamond to see when it was recorded.</p>` + chart.svg +
-    `<div class="tablewrap"><table><tr><th>Status from</th><th>Recorded</th><th>Status</th><th>Reading</th><th>Pointer into the source</th></tr>${rec.entries.map((x) =>
+  host.innerHTML = `<p class="small muted">One box's voltage over 10 hours: <b>${samples.toLocaleString()} samples fetched</b> from the source, <b>${rec.total} entries stored</b> in the Record.</p>` + chart.svg +
+    `<p class="small"><b>Stored in the Record</b></p><div class="tablewrap"><table><tr><th>Status from</th><th>Recorded</th><th>Status</th><th>Reading</th><th>Pointer into the source</th></tr>${rec.entries.map((x) =>
       `<tr class="click" data-go="#/entry/${x.id}"><td class="t">${fmt(x.t_start)}</td><td class="t">${fmt(x.known_at)}</td><td><b>${esc(x.payload.value)}</b></td><td>${x.payload.reading} ${esc(x.payload.unit)}</td><td class="mono small">${esc(x.raw_ref)}</td></tr>`).join('')}</table></div>`;
 }
 
@@ -609,7 +596,8 @@ PAGES.interfaces = async () => {
       ${impls.length ? `<h4>Implementations to write</h4><ul class="sigs">${impls.map((x) => `<li><a class="mono" href="/source/${i.file}#L${x.line}" target="_blank" rel="noopener">${esc(x.name)}</a> <span class="small">${esc(x.doc)}</span></li>`).join('')}</ul>` : ''}
     </div>`;
   };
-  const html = `<h1>Interfaces of the parts not built yet</h1>
+  const html = `${EXPLAINER('Read from the code of this repository, not from the Record.')}
+  <h1>Interfaces of the parts not built yet</h1>
   <p class="lead">Each part of the design that does not run yet exists as code that fixes its interface: what it takes, what it gives, and the calls it must answer. This page is read from that code, so it cannot drift from it. Every method raises "not implemented".</p>
   <div class="note">Where a part would produce entries, the card shows one real entry of that kind from this Record. Today the generator writes those entries itself; the interface says what a real part must produce instead.</div>
   ${groups.map(([g, title]) => `<h2>${title}</h2>${d.interfaces.filter((i) => i.group === g).map(card).join('')}`).join('')}
@@ -873,7 +861,8 @@ PAGES.scenarios = async () => {
   if (!modes.includes(DV.mode)) { DV.mode = modes[0]; DV.idx = 0; }
   const cases = d.cases.filter((c) => c.mode === DV.mode);
   const c = cases[Math.min(DV.idx, cases.length - 1)];
-  const html = `<h1>Scenarios in this demo</h1>
+  const html = `${EXPLAINER('Read from the generator\'s own notes (planted.json), not from the Record. A real Record has no such list.')}
+  <h1>Scenarios in this demo</h1>
   <p class="lead">The generator planted ${d.cases.length} situations into the routine background. They are the worked examples of this demo. A real Record has no such list: this page reads the generator's own notes, kept in a separate file, not the Record.</p>
   <div class="tabs">${modes.map((m) => `<button data-dv-mode="${m}" class="${m === DV.mode ? 'on' : ''}">${esc(d.modes[m].title)} (${d.cases.filter((x) => x.mode === m).length})</button>`).join('')}</div>
   <div class="note"><b>${esc(d.modes[DV.mode].title)}.</b> ${esc(d.modes[DV.mode].story)}</div>

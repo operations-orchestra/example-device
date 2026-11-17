@@ -565,6 +565,7 @@ def generate(cfg: DeviceConfig, out_dir: str | Path, force: bool = False) -> dic
         "preset": cfg.preset, "seed": str(cfg.seed), "config": json.dumps(asdict(cfg), sort_keys=True),
         "calendar_start": to_iso(plan.start), "calendar_end": to_iso(plan.end),
         "lumisection_s": str(LUMISECTION_S),
+        "status_rules": json.dumps({q: r.describe() for q, r in readings.RULES.items()}, sort_keys=True),
     })
     write_model(store, model)
     gen = _Gen(store, cfg, model, plan, archive_dir)
