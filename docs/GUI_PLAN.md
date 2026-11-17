@@ -367,3 +367,20 @@ That nothing in the demo is written by a language model is now one sentence on p
 no early evidence. Every page, and three pages inside a replay, were loaded in headless
 Chrome and confirmed to render; five were looked at as screenshots. Not checked by anyone:
 clicking through a replay (step, Play, jumps, Exit), drag-to-zoom, and the answer-key box.
+
+## 12. Changes on 17 November 2026
+
+- **Readings come from the source archive**, not the Record (see DESIGN.md 7a). The timeline
+  fetches them for the range in view and asks again on zoom; a "Reading status" row shows
+  what the Record keeps instead.
+- **Entries page**: a tree (class, then source, then type) with one colour per class wherever
+  an entry is listed. Clicking a selected branch, or its arrow, collapses it.
+- **Detector map**: each box's states sit on the left and its channels on the right, so they
+  cannot overlap; states are abbreviated (link, LV, temp) and a state that is not normal is red.
+- **Timeline of CMS or HCAL**: every readout box is drawn, one thin line each, coloured by
+  subdetector. Up to four boxes are still coloured one by one. Incident labels too close
+  together are left out until you zoom in.
+- **Loading a different Record**: the "Record:" button at the top right lists the Record
+  files under the starting folder (`out/`) with preset, seed, entries and size, and takes a
+  typed path. The service switches with `POST /api/use`; the file must open as a Record.
+  Files are still opened read-only.

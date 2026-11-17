@@ -62,12 +62,77 @@ def source_page(rel: str) -> Optional[bytes]:
             f"<table>{rows}</table>").encode()
 
 
-def make_handler(db_path: Path, planted: Optional[Path]):
+def record_info(path: Path) -> Optional[dict[str, Any]]:
+    """What a candidate Record file is, or None if it is not a Record."""
+    try:
+        store = RecordStore.open(path)
+    except Exception:
+        return None
+    try:
+        meta = store.meta()
+        if "schema_version" not in meta:
+            return None
+        return {"path": str(path), "preset": meta.get("preset"), "seed": meta.get("seed"),
+                "synthetic": meta.get("synthetic") == "true", "entries": store.table_counts(store.latest_known_at())["entry"],
+                "size_mb": round(path.stat().st_size / 1e6, 2),
+                "planted": path.with_name("planted.json").exists(),
+                "archive": (path.parent / "source" / "control_archive" / "index.json").exists()}
+    except Exception:
+        return None
+    finally:
+        store.close()
+
+
+def find_records(base: Path, depth: int = 3) -> list[dict[str, Any]]:
+    """Record files under ``base``, for the GUI's chooser."""
+    found = []
+    for path in sorted(base.rglob("*.db")):
+        if len(path.relative_to(base).parts) <= depth and (info := record_info(path)):
+            found.append(info)
+    return found
+
+
+class Current:
+    """Which Record the GUI is showing. The server starts with one; the GUI can switch."""
+
+    def __init__(self, db_path: Path):
+        self.base = db_path.resolve().parent.parent if db_path.resolve().parent.name != "out" else db_path.resolve().parent
+        self.use(db_path)
+
+    def use(self, db_path: Path) -> None:
+        db_path = Path(db_path)
+        if record_info(db_path) is None:
+            raise ValueError(f"{db_path} is not a Record")
+        planted = db_path.with_name("planted.json")
+        self.db, self.planted = db_path, (planted if planted.exists() else None)
+
+
+def make_handler(current: "Current"):
     class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802
+            if urlparse(self.path).path != "/api/use":
+                self._send(404, b"not found", "text/plain")
+                return
+            try:
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+                path = Path(str(body.get("path", ""))).expanduser()
+                if not path.is_absolute():
+                    path = (Path.cwd() / path)
+                if path.suffix != ".db" or not path.is_file():
+                    raise ValueError(f"no .db file at {path}")
+                current.use(path)
+                self._send(200, json.dumps({"path": str(current.db)}).encode(), "application/json")
+            except Exception as exc:
+                self._send(400, json.dumps({"error": str(exc)}).encode(), "application/json")
+
         def do_GET(self) -> None:  # noqa: N802
             url = urlparse(self.path)
+            if url.path == "/api/records":
+                body = {"current": str(current.db), "base": str(current.base), "records": find_records(current.base)}
+                self._send(200, json.dumps(body).encode(), "application/json")
+                return
             if url.path.startswith("/api/"):
-                status, body = handle_api(db_path, planted, url.path[len("/api/"):], dict(parse_qsl(url.query)))
+                status, body = handle_api(current.db, current.planted, url.path[len("/api/"):], dict(parse_qsl(url.query)))
                 self._send(status, json.dumps(body).encode(), "application/json")
                 return
             if url.path.startswith("/source/"):
@@ -99,8 +164,7 @@ def make_handler(db_path: Path, planted: Optional[Path]):
 def make_server(db_path: str | Path, port: int = 8765) -> ThreadingHTTPServer:
     db_path = Path(db_path)
     RecordStore.open(db_path).close()          # fail early if there is no Record
-    planted = db_path.with_name("planted.json")
-    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(db_path, planted if planted.exists() else None))
+    return ThreadingHTTPServer(("127.0.0.1", port), make_handler(Current(db_path)))
 
 
 def serve(db_path: str | Path, port: int = 8765) -> None:

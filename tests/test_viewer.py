@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from viewer.api import DEMO_ONLY, NO_AS_OF, ROUTES
+from example_device import generate, preset
 from viewer.server import handle_api, make_server
 
 ARGS = {"entry": {"id": "33"}, "incident": {"id": "3"}, "timeline": {"element": "HFP02"},
@@ -248,3 +249,36 @@ def test_timeline_readings_come_from_the_archive_and_stop_at_the_moment(call, ti
     _, zoom = call("timeline", element="HBP02", as_of=t1, t0=case["t_event"] - 1800, t1=case["t_event"])
     pts = next(p for p in zoom["panels"] if p["type"] == "lv_voltage")["series"][0]["points"]
     assert all(p["n"] == 1 for p in pts) and len(pts) > 20
+
+
+def test_the_gui_can_switch_to_another_record(tiny, tmp_path):
+    other = generate(preset("tiny", seed=2), tmp_path / "out" / "seed2")
+    server = make_server(tiny["db"], port=0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_port}"
+
+    def post(path):
+        req = urllib.request.Request(base + "/api/use", data=json.dumps({"path": path}).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        return urllib.request.urlopen(req)
+
+    try:
+        listing = json.load(urllib.request.urlopen(base + "/api/records"))
+        assert listing["current"] == str(tiny["db"]) and any(r["path"] == str(tiny["db"]) for r in listing["records"])
+        post(other["db"])
+        meta = json.load(urllib.request.urlopen(base + "/api/meta"))
+        assert meta["path"] == other["db"] and meta["seed"] == "2"
+        for bad in (str(tmp_path / "nope.db"), tiny["planted"], str(Path(tiny["db"]).parent)):
+            with pytest.raises(urllib.error.HTTPError):
+                post(bad)
+        assert json.load(urllib.request.urlopen(base + "/api/meta"))["path"] == other["db"]   # unchanged by bad requests
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_timeline_for_the_whole_experiment_shows_every_box(call, store, end):
+    _, body = call("timeline", element="CMS", as_of=end)
+    assert sorted(body["boxes"]) == sorted(store.elements("readout_box"))
+    volts = next(p for p in body["panels"] if p["type"] == "lv_voltage")
+    assert all(s["group"] in body["groups"] for s in volts["series"])

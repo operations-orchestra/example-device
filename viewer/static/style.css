@@ -153,3 +153,9 @@ a.code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-spa
 .tn .tc { margin-left: auto; color: var(--ink2); font-variant-numeric: tabular-nums; } .tn .tk { color: var(--muted); font-size: 11px; }
 .tn.l0 { font-weight: 600; } .tn.l1 { margin-top: 6px; font-weight: 600; } .tn.l2 { padding-left: 22px; color: var(--ink2); } .tn.l3 { padding-left: 38px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
 svg .warn { fill: var(--warn); }
+svg .line.thin { stroke-width: 1.2; opacity: .8; }
+svg .st-bad { fill: var(--critical); font-weight: 600; }
+.tn .chev { width: 12px; color: var(--muted); font-size: 11px; flex: none; } .tn.l3 { padding-left: 44px; }
+.recfile { margin-left: auto; position: relative; } .recfile button { font-size: 13px; }
+.rec-panel { position: absolute; right: 0; top: 34px; z-index: 30; width: min(760px, 92vw); background: var(--surface); border: 1px solid var(--axis); border-radius: 8px; padding: 12px 14px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.rec-panel tr.on td { background: var(--grid); font-weight: 600; }

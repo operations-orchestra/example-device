@@ -173,7 +173,7 @@ function buildChart(cfg) {
     }
     let marks = '';
     p.series.forEach((s, i) => {
-      const cls = `c${i + 1}`;
+      const cls = s.cls || `c${i + 1}`;
       const pts = s.points.filter((q) => q.t1 >= cfg.t0 && q.t0 <= cfg.t1);
       if (p.per_run) {
         for (const q of pts) marks += `<line class="line ${cls}" x1="${X(q.t0)}" x2="${X(q.t1)}" y1="${Y(q.v)}" y2="${Y(q.v)}"/>`;
@@ -213,11 +213,14 @@ function buildChart(cfg) {
   const tk = ticks(cfg.t0, cfg.t1, Math.max(4, Math.floor((W - L - R) / 90)));
   let frame = '';
   for (const t of tk.out) frame += `<line class="grid" x1="${X(t)}" x2="${X(t)}" y1="20" y2="${bottom}"/><text x="${X(t)}" y="${bottom + 14}" text-anchor="middle">${tickLabel(t, tk.step)}</text>`;
-  let lines = '';
+  let lines = '', lastLabel = -1e9;
   for (const v of cfg.vlines || []) {
     if (v.t < cfg.t0 || v.t > cfg.t1) continue;
     lines += `<line class="${v.cls}" x1="${X(v.t)}" x2="${X(v.t)}" y1="20" y2="${bottom}"/>`;
-    if (v.label) lines += `<text class="hit" x="${X(v.t)}" y="13" text-anchor="middle" data-tip="${esc(v.tip || '')}"${v.go ? ` data-go="${v.go}"` : ''}>${esc(v.label)}</text>`;
+    if (v.label && X(v.t) - lastLabel >= 26) {         // labels too close to the previous one are left out; zoom in to see them
+      lines += `<text class="hit" x="${X(v.t)}" y="13" text-anchor="middle" data-tip="${esc(v.tip || '')}"${v.go ? ` data-go="${v.go}"` : ''}>${esc(v.label)}</text>`;
+      lastLabel = X(v.t);
+    }
   }
   const H = bottom + 34;
   const svg = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(cfg.aria || 'timeline')}">
@@ -274,6 +277,8 @@ const hideTip = () => { $('#tip').hidden = true; };
 /* --------------------------------------------------------- detector map */
 const NORMAL = new Set(['on', 'ok', 'normal', 'STABLE BEAMS', 'NO BEAM', 'TECHNICAL STOP']);
 const stateName = (k) => k.replace('_status', '').replace(/_/g, ' ');
+const SHORT = { control_link: 'link', lv_voltage_status: 'LV', temperature_status: 'temp', supply_state: 'supply', beam_mode: 'beam' };
+const shortName = (k) => SHORT[k] || stateName(k);
 function mapSvg(d, width) {
   const W = Math.max(760, width), SW = 170, FW = 170, SX = 16, FX = W - FW - 16, BX = SX + SW + 70, BW = FX - 70 - BX, RH = 50, GAP = 10;
   const by = Object.fromEntries(d.elements.map((e) => [e.name, e]));
@@ -291,7 +296,7 @@ function mapSvg(d, width) {
     let g = `<g class="hit" data-go="#/timeline/${encodeURIComponent(e.name)}" data-tip="${esc(tip)}">
       <rect x="${x}" y="${yy}" width="${w}" height="${h}" rx="6" class="node${bad ? ' bad' : ''}"/>
       <text class="title" x="${x + 10}" y="${yy + 18}">${esc(e.name)}</text>
-      <text x="${x + 10}" y="${yy + 34}">${st.length ? st.map(([k, v]) => `${stateName(k)}: ${v.value}`).join(' · ') : ''}</text>${extra || ''}</g>`;
+      <text x="${x + 10}" y="${yy + 34}">${st.map(([k, v]) => `<tspan class="${NORMAL.has(v.value) ? '' : 'st-bad'}">${shortName(k)} ${esc(v.value)}</tspan>`).join(' · ')}</text>${extra || ''}</g>`;
     (issues[e.name] || []).forEach((i, k) => {
       g += `<text class="hit issue" x="${x + w - 8}" y="${yy + 18 + 14 * k}" text-anchor="end" data-go="#/incident/${i.id}" data-tip="${esc(i.title + ' (' + i.status + ')')}">open issue #${i.id}</text>`;
     });
@@ -304,14 +309,17 @@ function mapSvg(d, width) {
         const boxes = kids(sub.name, 'readout_box');
         const top = y;
         body += `<text class="title" x="${BX}" y="${y + 14}">${esc(sub.name)}</text>` +
-          (issues[sub.name] || []).map((i) => `<text class="hit issue" x="${BX + 40}" y="${y + 14}" data-go="#/incident/${i.id}">open issue #${i.id}</text>`).join('');
-        y += 22;
+          (issues[sub.name] || []).map((i, k) => `<text class="hit issue" x="${BX + 40 + k * 100}" y="${y + 14}" data-go="#/incident/${i.id}">open issue #${i.id}</text>`).join('');
+        y += 24;
         for (const b of boxes) {
           const chans = kids(b.name, 'channel');
-          const cw = Math.min(11, (BW - 150) / Math.max(1, chans.length));
-          const cells = chans.map((c, k) => `<rect class="${hot[c.name] ? 'chan hot' : 'chan'}" x="${BX + 140 + k * cw}" y="${y + RH - 17}" width="${cw - 2}" height="9"><title>${esc(c.name)}${hot[c.name] ? ': flagged ' + hot[c.name].flag : ''}</title></rect>`).join('');
+          // the left part of the box is for its name and states; channels start after it
+          const CX = BX + Math.max(260, Math.min(330, BW * 0.45));
+          const cw = Math.max(3, Math.min(11, (BX + BW - 16 - CX) / Math.max(1, chans.length)));
+          const cells = chans.map((c, k) => `<rect class="${hot[c.name] ? 'chan hot' : 'chan'}" x="${CX + k * cw}" y="${y + RH - 25}" width="${cw - 2}" height="9"><title>${esc(c.name)}${hot[c.name] ? ': flagged ' + hot[c.name].flag : ''}</title></rect>`).join('');
           const nhot = chans.filter((c) => hot[c.name]).length;
-          body += node(b, BX, y, BW, RH - GAP, cells + `<text x="${BX + 140}" y="${y + 18}">${chans.length} channels${nhot ? `, ${nhot} flagged hot` : ''}</text>`);
+          body += node(b, BX, y, BW, RH - GAP, cells + `<text x="${CX}" y="${y + 18}">${chans.length} channels${nhot ? `, ${nhot} flagged hot` : ''}</text>` +
+            `<line class="grid" x1="${CX - 12}" x2="${CX - 12}" y1="${y + 6}" y2="${y + RH - GAP - 6}"/>`);
           centre[b.name] = y + (RH - GAP) / 2;
           y += RH;
         }
@@ -469,7 +477,7 @@ PAGES.detector = async () => {
     <tr><td>low-voltage supply</td><td class="num">${n('lv_supply')}</td><td>Powers one or more boxes. Has a state: on, off or tripped.</td></tr>
     <tr><td>FED</td><td class="num">${n('fed')}</td><td>Back-end board that reads out one or more boxes.</td></tr></table></div>
   <h2>About this Record</h2>
-  <dl class="facts card"><dt>File</dt><dd class="mono">${esc(m.path)} (${m.size_mb} MB, opened read-only)</dd>
+  <dl class="facts card"><dt>File</dt><dd class="mono">${esc(m.path)} (${m.size_mb} MB, opened read-only) <button data-recfile>load a different Record</button></dd>
     <dt>Generated with</dt><dd>preset <b>${esc(m.preset)}</b>, seed ${esc(m.seed)}</dd>
     <dt>Calendar</dt><dd>${fmt(m.t0)} to ${fmt(m.t1)} UTC</dd></dl>`;
   return { html, mount() { $('#map').innerHTML = mapSvg(d, $('#map').clientWidth); } };
@@ -577,6 +585,7 @@ PAGES.tables = async () => {
   } };
 };
 
+const TREE = { closed: new Set() };
 const RF = { cls: '', source: '', type: '', kind: '', element: '', below: false, q: '', order: 'oldest', offset: 0 };
 PAGES.record = async () => {
   const o = await api('overview');
@@ -594,12 +603,15 @@ PAGES.record = async () => {
     sn.n += n; sn.types.push([t, k, n]);
   }
   const on = (c, src, t) => RF.cls === c && (RF.source || '') === (src || '') && (RF.type || '') === (t || '');
-  const node = (label, n, filter, level, active, extra = '') => `<div class="tn l${level}${active ? ' on' : ''}" data-pick='${JSON.stringify(filter)}'>${label}<span class="tc">${n}</span>${extra}</div>`;
+  // a branch is open unless it was collapsed; clicking the selected branch again collapses it
+  const node = (label, n, filter, level, active, key, extra = '') => `<div class="tn l${level}${active ? ' on' : ''}" data-pick='${JSON.stringify(filter)}'${key ? ` data-key="${key}"` : ''}>${key ? `<span class="chev">${TREE.closed.has(key) ? '&#9656;' : '&#9662;'}</span>` : ''}${label}<span class="tc">${n}</span>${extra}</div>`;
   const treeHtml = node('All entries', o.n_entries, {}, 0, !RF.cls && !RF.source && !RF.type) + ['MS', 'QA', 'HI'].filter((c) => tree[c]).map((c) => {
-    const open = RF.cls === c || !RF.cls;
-    return node(`${clsTag(c)} ${CLASS_NAME[c]}`, tree[c].n, { cls: c }, 1, on(c)) + (open ? Object.entries(tree[c].sources).sort((a, b) => b[1].n - a[1].n).map(([src, sn]) =>
-      node(esc(src), sn.n, { cls: c, source: src }, 2, on(c, src)) + sn.types.sort((a, b) => b[2] - a[2]).map(([t, k, n]) =>
-        node(esc(t), n, { cls: c, source: src, type: t }, 3, on(c, src, t), `<span class="tk">${k}</span>`)).join('')).join('') : '');
+    const ck = `c:${c}`;
+    return node(`${clsTag(c)} ${CLASS_NAME[c]}`, tree[c].n, { cls: c }, 1, on(c), ck) + (TREE.closed.has(ck) ? '' : Object.entries(tree[c].sources).sort((a, b) => b[1].n - a[1].n).map(([src, sn]) => {
+      const sk = `s:${c}/${src}`;
+      return node(esc(src), sn.n, { cls: c, source: src }, 2, on(c, src), sk) + (TREE.closed.has(sk) ? '' : sn.types.sort((a, b) => b[2] - a[2]).map(([t, k, n]) =>
+        node(esc(t), n, { cls: c, source: src, type: t }, 3, on(c, src, t), null, `<span class="tk">${k}</span>`)).join(''));
+    }).join(''));
   }).join('');
   const html = `<h1>What is in the Record: entries</h1>
   <p class="lead">Every event, status change, note and flag is one entry. Pick a branch on the left to narrow the list; click a row for the full entry.</p>
@@ -621,7 +633,14 @@ PAGES.record = async () => {
     document.querySelectorAll('[data-rf]').forEach((el) => el.addEventListener('change', () => { RF[el.dataset.rf] = el.type === 'checkbox' ? el.checked : el.value; RF.offset = 0; render(); }));
     $('[data-rf-clear]').addEventListener('click', () => { Object.assign(RF, { cls: '', source: '', type: '', element: '', below: false, q: '', offset: 0 }); render(); });
     document.querySelectorAll('[data-rf-page]').forEach((b) => b.addEventListener('click', () => { RF.offset = Math.max(0, RF.offset + (+b.dataset.rfPage)); render(); }));
-    document.querySelectorAll('[data-pick]').forEach((r) => r.addEventListener('click', () => { Object.assign(RF, { cls: '', source: '', type: '', offset: 0 }, JSON.parse(r.dataset.pick)); render(); }));
+    document.querySelectorAll('[data-pick]').forEach((r) => r.addEventListener('click', (ev) => {
+      const key = r.dataset.key;
+      if (key && (r.classList.contains('on') || ev.target.closest('.chev'))) {       // second click, or the arrow: open or close
+        if (TREE.closed.has(key)) TREE.closed.delete(key); else TREE.closed.add(key);
+        if (ev.target.closest('.chev') && !r.classList.contains('on')) { render(); return; }
+      } else if (key) TREE.closed.delete(key);
+      Object.assign(RF, { cls: '', source: '', type: '', offset: 0 }, JSON.parse(r.dataset.pick)); render();
+    }));
   } };
 };
 
@@ -709,16 +728,17 @@ PAGES.timeline = async (parts) => {
   const name = parts[1] ? decodeURIComponent(parts[1]) : (S.elements.find((e) => e.kind === 'readout_box') || S.elements[0]).name;
   const d = await api('timeline', { element: name });
   if (TL.t0 == null) { TL.t0 = d.t0; TL.t1 = d.t1; }
-  const kinds = ['subdetector', 'readout_box', 'lv_supply', 'fed', 'detector'];
+  const kinds = ['experiment', 'detector', 'subdetector', 'readout_box', 'lv_supply', 'fed'];
   const html = `<h1>What is in the Record: timeline of ${esc(name)}</h1>
-  <p class="lead">Readings from ${d.boxes.map(esc).join(', ')}${d.n_boxes > d.boxes.length ? ` (first ${d.boxes.length} of ${d.n_boxes} boxes)` : ''}, with what was recorded about ${esc(name)} and the parts around it.</p>
+  <p class="lead">${d.colour_by === 'box' ? `Readings from ${d.boxes.map(esc).join(', ')}` : `Readings from all ${d.boxes.length} readout boxes, one line each, coloured by subdetector`}, with what was recorded about ${esc(name)} and the parts around it.</p>
   <div class="filters">
     <label>Element <select id="tl-el">${kinds.map((k) => `<optgroup label="${k.replace('_', ' ')}">${S.elements.filter((e) => e.kind === k).map((e) => `<option${e.name === name ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</optgroup>`).join('')}</select></label>
     <button data-tl="in">Zoom in</button><button data-tl="out">Zoom out</button><button data-tl="left">&#9664;</button><button data-tl="right">&#9654;</button>
     <button data-tl="all">Whole calendar</button>
     <label><input type="checkbox" id="tl-typ"${TL.typical ? ' checked' : ''}> Vertical scale: typical range</label>
   </div>
-  ${d.boxes.length > 1 ? `<div class="key">${d.boxes.map((b, k) => `<span><i class="c${k + 1}"></i>${esc(b)}</span>`).join('')}</div>` : ''}
+  ${d.colour_by === 'subdetector' ? `<div class="key">${d.groups.map((g, k) => `<span><i class="c${k + 1}"></i>${esc(g)}</span>`).join('')}</div>`
+    : d.boxes.length > 1 ? `<div class="key">${d.boxes.map((b, k) => `<span><i class="c${k + 1}"></i>${esc(b)}</span>`).join('')}</div>` : ''}
   <div id="tl"></div>
   <details open><summary>How to read this</summary>
   <ul><li><b>Voltage and temperature are not stored in the Record.</b> They are fetched from the source archive for the range in view. Zoomed out, each drawn point averages many samples and the light band (shown for a single box) is their minimum to maximum; zoom in far enough and every sample is drawn. <a href="#/built">Why the Record does not keep them.</a></li>
@@ -752,7 +772,8 @@ function mountTimeline(host, d, view, name) {
     tip: `${fmt(it.t0)}\n${it.text}`, go: `#/entry/${it.id}` })) }));
   let cur = d, token = 0;
   const draw = () => {
-    const panels = cur.panels.map((p) => (p.from_source ? { ...p, label: `${p.label}, from the source archive` } : p));
+    const colour = (s, i) => ({ ...s, cls: cur.colour_by === 'subdetector' ? `c${cur.groups.indexOf(s.group) + 1} thin` : `c${i + 1}` });
+    const panels = cur.panels.map((p) => ({ ...p, series: p.series.map(colour), label: p.from_source ? `${p.label}, from the source archive` : p.label }));
     const cfg = { t0: view.t0, t1: view.t1, width: host.clientWidth, typical: view.typical, panels, rows: rowsOf(cur),
       vlines: cur.incidents.map((i) => ({ t: i.t_start, cls: 'inc', label: `#${i.id}`, tip: `${i.title} (${i.status})`, go: `#/incident/${i.id}` })).concat(S.replay ? [{ t: S.asOf, cls: 'asof' }] : []),
       aria: `readings and recorded events for ${name}` };
@@ -985,6 +1006,7 @@ async function render() {
   }
 }
 document.addEventListener('click', (ev) => {
+  if (ev.target.closest('[data-recfile]')) { ev.stopPropagation(); openRecordPanel(); return; }
   const rp = ev.target.closest('[data-replay]');
   if (rp) { ev.stopPropagation(); startReplay(+rp.dataset.replay); return; }
   const fr = ev.target.closest('[data-free]');
@@ -1003,8 +1025,41 @@ window.addEventListener('hashchange', () => { syncHash(); render(); window.scrol
 let resizeTimer = null;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(render, 200); });
 
+/* which Record file is loaded ------------------------------------------------------- */
+async function loadRecord() {
+  S.meta = await api('meta', {}, false);
+  S.asOf = S.meta.latest_known_at;
+  S.elements = (await api('elements')).elements;
+  $('#rec-name').textContent = S.meta.path;
+}
+async function openRecordPanel() {
+  const panel = $('#rec-panel');
+  if (!panel.hidden) { panel.hidden = true; return; }
+  const d = await (await fetch('/api/records')).json();
+  panel.innerHTML = `<b>Load a Record</b><p class="small muted">Record files found under ${esc(d.base)}. The GUI never writes to them.</p>
+    <table>${d.records.map((r) => `<tr class="click${r.path === d.current ? ' on' : ''}" data-use="${esc(r.path)}"><td class="mono small">${esc(r.path.replace(d.base + '/', ''))}</td>
+      <td>${esc(r.preset || '?')}, seed ${esc(r.seed || '?')}</td><td class="num">${r.entries} entries</td><td class="num">${r.size_mb} MB</td>
+      <td class="small muted">${r.archive ? 'archive' : 'no archive'} · ${r.planted ? 'scenarios' : 'no scenarios'}</td></tr>`).join('')}</table>
+    <div class="filters"><input type="text" id="rec-path" placeholder="or type a path to a .db file" size="46"><button id="rec-open" class="primary">Open</button></div>
+    <p class="small muted">Build another with <code>pixi run orchestra synth --preset small --out out/small</code>.</p><p id="rec-err" class="small"></p>`;
+  panel.hidden = false;
+  const use = async (path) => {
+    const r = await fetch('/api/use', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+    const j = await r.json();
+    if (!r.ok) { $('#rec-err').textContent = j.error; return; }
+    panel.hidden = true;
+    stopPlay(); S.replay = null; S.planted = null; TB.incident = null; DV.mode = null; TL.t0 = null; RS.viewFor = null;
+    Object.assign(RF, { cls: '', source: '', type: '', element: '', below: false, q: '', offset: 0 });
+    await loadRecord(); location.hash = '#/detector'; syncHash(); render();
+  };
+  panel.querySelectorAll('[data-use]').forEach((row) => row.addEventListener('click', () => use(row.dataset.use)));
+  $('#rec-open').addEventListener('click', () => use($('#rec-path').value));
+}
+
 (async function start() {
   S.meta = await api('meta', {}, false);
+  $('#rec-name').textContent = S.meta.path;
+  $('#rec-btn').addEventListener('click', openRecordPanel);
   $('#banner').title = S.meta.banner;
   S.asOf = S.meta.latest_known_at;
   S.elements = (await api('elements')).elements;

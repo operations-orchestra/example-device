@@ -169,14 +169,18 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
     as_of = _as_of(q)
     name = _element(store, q)
     boxes, marks = scope(store, name)
-    shown = boxes[:4]
+    # up to four boxes are told apart by colour; more than that are all drawn, coloured by subdetector
+    shown = boxes if len(boxes) > 4 else boxes[:4]
+    group_of = {b: store.parent(b) for b in shown}
     ls = int(store.meta().get("lumisection_s", 23))
     span0, span1 = store.time_span()
     t0, t1 = _int(q, "t0", default=span0), _int(q, "t1", default=span1)
     archive = ctx.get("archive")
     panels = []
     for quantity, label, unit in READINGS:
-        series = [{"box": box, "points": archive.fetch(box, quantity, t0, t1, as_of) if archive else []} for box in shown]
+        series = [{"box": box, "group": group_of[box],
+                   "points": archive.fetch(box, quantity, t0, t1, as_of, max_points=600 if len(shown) <= 4 else 300) if archive else []}
+                  for box in shown]
         panels.append({"type": quantity, "key": "v", "label": label, "unit": unit, "per_run": False,
                        "from_source": True, "series": series})
     for etype, key, label, unit in QUANTITIES:
@@ -186,7 +190,7 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
             for e in store.entries(as_of, elements=[box], types=[etype]):
                 pts.append({"id": e.id, "t0": e.t_start, "t1": e.t_end, "v": e.payload[key],
                             "lo": e.payload.get("min"), "hi": e.payload.get("max")})
-            series.append({"box": box, "points": pts})
+            series.append({"box": box, "group": group_of[box], "points": pts})
         panels.append({"type": etype, "key": key, "label": label, "unit": unit,
                        "per_run": etype == "occupancy_summary", "series": series})
 
@@ -229,7 +233,9 @@ def timeline(store: RecordStore, q: dict, ctx: dict) -> dict:
                     strip["Reading status"].append({
                         "id": cur.id, "t0": cur.t_start, "t1": nxt.t_start if nxt else None, "value": cur.payload["value"],
                         "text": f"{box} {label.lower()}: {cur.payload['value']} (recorded {to_iso(cur.known_at)})"})
+    groups = sorted({g for g in group_of.values()})
     return {"element": name, "kind": store.element_kind(name), "boxes": shown, "n_boxes": len(boxes),
+            "colour_by": "box" if len(shown) <= 4 else "subdetector", "groups": groups,
             "marks": marks, "panels": panels, "strip": [{"row": k, "items": v} for k, v in strip.items()],
             "incidents": [asdict(i) for i in store.incidents(as_of, elements=marks)],
             "t0": span0, "t1": span1, "range": [t0, t1], "archive": bool(archive)}
