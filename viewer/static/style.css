@@ -191,3 +191,12 @@ svg .leader { stroke: var(--axis); stroke-width: 1; }
 .tiles { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 12px; } .tile { background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; padding: 8px 14px; min-width: 130px; }
 .tile b { display: block; font-size: 22px; } .tile span { color: var(--ink2); font-size: 12px; }
 table.matrix { width: auto; } table.matrix td, table.matrix th { text-align: center; } table.matrix td:first-child { text-align: left; }
+.io-agent { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(320px, 2fr); gap: 12px; margin-top: 8px; }
+@media (max-width: 900px) { .io-agent { grid-template-columns: 1fr; } }
+.io-in, .io-out { border: 1px solid var(--grid); border-radius: 8px; padding: 8px 12px; background: var(--page); }
+.io-out { border: 2px solid var(--s3); background: var(--surface); }
+.io-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink2); font-weight: 700; margin-bottom: 4px; }
+.facts.answer dt { font-weight: 600; color: var(--ink); } .ok-text { color: var(--s3); text-transform: none; letter-spacing: 0; margin-left: 6px; }
+.io-out .bad-text { text-transform: none; letter-spacing: 0; margin-left: 6px; }
+th.sorthead { cursor: pointer; user-select: none; } th.sorthead:hover { color: var(--ink); }
+th.sorthead[data-dir="asc"]::after { content: " ▲"; } th.sorthead[data-dir="desc"]::after { content: " ▼"; }

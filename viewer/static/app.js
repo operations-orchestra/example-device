@@ -964,9 +964,9 @@ PAGES.replay = async () => {
     <h2>Pick an incident to replay</h2>
     <p class="muted small">"Seen before?" asks, at the moment a crew would first ask, whether an earlier incident was already on record. Two possible rules are shown: an earlier incident that concerns one of the same parts, or one with the same kind of symptom on any element.</p>
     <div class="filters">${pl ? reveal : ''}</div>
-    <div class="tablewrap"><table><tr><th></th><th>#</th><th>Started</th><th>Element</th><th>Title</th><th>Seen before on a shared part?</th><th>Seen before with the same symptom?</th>${S.reveal ? '<th class="key-col">Planted situation</th><th class="key-col">Honest answer when asked</th>' : ''}</tr>
-    ${d.incidents.map((i) => `<tr><td><button class="primary" data-replay="${i.id}">Replay</button></td><td class="num">${i.id}</td><td class="t">${tm(i.t_start)}</td><td>${esc(i.element)}</td><td>${incLink(i.id, i.title)}</td>
-      <td>${list(i.same_element)}</td><td>${list(i.same_symptom)}</td>${S.reveal ? `<td class="key-col">${cases[i.id] ? esc(cases[i.id].mode.replace(/_/g, ' ')) : ''}</td><td class="key-col">${cases[i.id] ? esc(cases[i.id].expected.verdict.replace(/_/g, ' ')) + ', ' + esc(cases[i.id].expected.next_step.replace(/_/g, ' ')) : ''}</td>` : ''}</tr>`).join('')}</table></div>
+    <div class="tablewrap"><table class="sortable"><tr><th></th><th>#</th><th>Started</th><th>Element</th><th>Title</th><th>Seen before on a shared part?</th><th>Seen before with the same symptom?</th>${S.reveal ? '<th class="key-col">Planted situation</th><th class="key-col">Honest answer when asked</th>' : ''}</tr>
+    ${d.incidents.map((i) => `<tr><td><button class="primary" data-replay="${i.id}">Replay</button></td><td class="num">${i.id}</td><td class="t" data-sort="${i.t_start}">${tm(i.t_start)}</td><td>${esc(i.element)}</td><td>${incLink(i.id, i.title)}</td>
+      <td data-sort="${i.same_element.length}">${list(i.same_element)}</td><td data-sort="${i.same_symptom.length}">${list(i.same_symptom)}</td>${S.reveal ? `<td class="key-col">${cases[i.id] ? esc(cases[i.id].mode.replace(/_/g, ' ')) : ''}</td><td class="key-col">${cases[i.id] ? esc(cases[i.id].expected.verdict.replace(/_/g, ' ')) + ', ' + esc(cases[i.id].expected.next_step.replace(/_/g, ' ')) : ''}</td>` : ''}</tr>`).join('')}</table></div>
     <p>Across these ${d.incidents.length} incidents, the shared-part rule says "seen before" for <b>${d.known_by_same_element}</b>, the same-symptom rule for <b>${d.known_by_same_symptom}</b>, and they disagree on <b>${d.disagree}</b>.</p>
     ${S.reveal && others.length ? `<h2>Planted situations that are not incidents</h2><ul>${others.map((c) => `<li>${esc(c.mode.replace(/_/g, ' '))} on ${esc(c.true_element)} at ${tm(c.t_event)}: the honest answer is "${esc(c.expected.verdict.replace(/_/g, ' '))}". <button data-free="${c.ask_at}">Look at the Record when the crew asks</button></li>`).join('')}</ul>` : ''}`;
     return { html, mount() { if ($('#rv')) $('#rv').addEventListener('change', (ev) => { S.reveal = ev.target.checked; render(); }); } };
@@ -1033,14 +1033,24 @@ async function mountAgent(iid, caseFor) {
   const call = (qid) => log[qid - 1];
   const argText = (c) => Object.entries(c.args).map(([k, v]) => `${k}=${Array.isArray(v) ? '[' + v.join(', ') + ']' : (['t', 't0', 't1', 'before'].includes(k) ? fmt(v) : v)}`).join(', ');
   host.innerHTML = `<div class="agent-head"><b>What the agent would say at this moment</b>
-      <span class="muted small">${p.brain} brain: a fixed procedure, no language model${a.accepted ? '' : ' · <b class="bad-text">rejected by the check</b>'}</span></div>
-    <p class="muted small">Asked: "${esc(a.trigger.question)}"</p>
-    <div class="verdict-row"><span class="verdict ${VERDICT_CLS[p.verdict]}">${p.verdict}</span> ${bar(p.confidence)} <b>${pct(p.confidence)}</b>
-      <span>next step: <b>${p.next_step.replace('_', ' ')}</b></span><span>part: ${elLink(p.element)}</span>
-      ${p.precedent ? `<span>precedent: ${incLink(p.precedent)}</span>` : ''}</div>
-    <p>${esc(p.diagnosis)}</p>
-    ${p.notes.map((n) => `<p class="small muted">${esc(n)}</p>`).join('')}
-    ${a.problems.length ? `<p class="bad-text small">${a.problems.map(esc).join('<br>')}</p>` : ''}
+      <span class="muted small">${p.brain} brain: a fixed procedure, no language model</span></div>
+    <div class="io-agent">
+      <div class="io-in"><div class="io-label">Input: the question</div>
+        <p>"${esc(a.trigger.question)}"</p>
+        <dl class="facts small"><dt>Asked at</dt><dd>${tm(a.trigger.as_of)}</dd><dt>Seen on</dt><dd>${elLink(a.trigger.part)}</dd>
+          <dt>Symptoms given</dt><dd>${a.trigger.symptom_ids.length} entries on record</dd></dl></div>
+      <div class="io-out"><div class="io-label">Output: the agent's answer ${a.accepted ? '<span class="ok-text">passed the check</span>' : '<span class="bad-text">rejected by the check</span>'}</div>
+        <dl class="facts answer">
+          <dt>Verdict</dt><dd><span class="verdict ${VERDICT_CLS[p.verdict]}">${p.verdict}</span> ${p.verdict === 'known' ? 'seen before' : p.verdict === 'new' ? 'not seen before' : 'possibly seen before'}</dd>
+          <dt>Confidence</dt><dd>${bar(p.confidence)} <b>${pct(p.confidence)}</b> <span class="muted small">known from ${pct(a.settings.known_at_least)}, new below ${pct(a.settings.new_below)}</span></dd>
+          <dt>Next step</dt><dd><b>${p.next_step.replace('_', ' ')}</b></dd>
+          <dt>Part at fault</dt><dd>${elLink(p.element)}</dd>
+          <dt>Precedent</dt><dd>${p.precedent ? incLink(p.precedent) : '<span class="muted">none</span>'}</dd>
+          <dt>Diagnosis</dt><dd>${esc(p.diagnosis)}</dd>
+          ${p.notes.length ? `<dt>Notes</dt><dd class="small">${p.notes.map(esc).join('<br>')}</dd>` : ''}
+        </dl>
+        ${a.problems.length ? `<p class="bad-text small">${a.problems.map(esc).join('<br>')}</p>` : ''}</div></div>
+    <div class="io-label" style="margin-top:10px">How it got there</div>
     <details ${p.candidates.length ? 'open' : ''}><summary><b>Earlier incidents recalled</b> (${p.candidates.length}) and how sure it is about each</summary>
       ${p.candidates.length ? `<div class="tablewrap"><table><tr><th>#</th><th>Title</th><th>Match</th><th>Confidence</th><th>How it was reached</th><th>What was done then</th></tr>
       ${p.candidates.map((c) => `<tr><td>${incLink(c.id)}</td><td>${esc(c.title)}</td><td>${c.signature === 'both' ? 'shared part and symptom' : c.signature === 'symptom' ? 'same symptom' : 'shared part'}<br><span class="small muted">${[...c.shared_parts, ...c.shared_kinds].map(esc).join(', ')}</span></td>
@@ -1126,11 +1136,12 @@ PAGES.agent = async () => {
   <div id="learn"></div>
   <h2>Every incident</h2>
   <div class="filters"><label><input type="checkbox" id="rv"${S.reveal ? ' checked' : ''}> Reveal the answer key</label> <span class="muted small">the generator's own notes, never part of the Record</span></div>
-  <div class="tablewrap"><table><tr><th>#</th><th>Title</th><th>Asked</th><th>Verdict</th><th>Confidence</th><th>Precedent</th><th>Next step</th><th>Judged later</th>${pl ? '<th class="key-col">Answer key</th>' : ''}<th></th></tr>
-  ${rows.map((r) => `<tr><td class="num">${r.id}</td><td>${incLink(r.id, r.title)}</td><td class="t">${tm(r.asked)}</td>
-    <td><span class="verdict ${VERDICT_CLS[r.verdict]}">${r.verdict}</span></td>
-    <td class="t"><span class="cbar"><span style="width:${pct(r.confidence)}"></span><i style="left:${pct(set.new_below)}"></i><i style="left:${pct(set.known_at_least)}"></i></span> ${pct(r.confidence)}</td>
-    <td>${r.precedent ? incLink(r.precedent) : '<span class="muted">none</span>'}</td><td>${r.next_step.replace('_', ' ')}</td><td>${badge(r.outcome)}</td>
+  <p class="small muted">Click a column header to sort.</p>
+  <div class="tablewrap"><table class="sortable"><tr><th>#</th><th>Title</th><th>Asked</th><th>Verdict</th><th>Confidence</th><th>Precedent</th><th>Next step</th><th>Judged later</th>${pl ? '<th class="key-col">Answer key</th>' : ''}<th></th></tr>
+  ${rows.map((r) => `<tr><td class="num">${r.id}</td><td>${incLink(r.id, r.title)}</td><td class="t" data-sort="${r.asked}">${tm(r.asked)}</td>
+    <td data-sort="${['new', 'uncertain', 'known'].indexOf(r.verdict)}"><span class="verdict ${VERDICT_CLS[r.verdict]}">${r.verdict}</span></td>
+    <td class="t" data-sort="${r.confidence}"><span class="cbar"><span style="width:${pct(r.confidence)}"></span><i style="left:${pct(set.new_below)}"></i><i style="left:${pct(set.known_at_least)}"></i></span> ${pct(r.confidence)}</td>
+    <td data-sort="${r.precedent ?? -1}">${r.precedent ? incLink(r.precedent) : '<span class="muted">none</span>'}</td><td>${r.next_step.replace('_', ' ')}</td><td data-sort="${r.outcome}">${badge(r.outcome)}</td>
     ${pl ? `<td class="key-col small">${key[r.id] ? `${esc(key[r.id].expected.verdict)}${key[r.id].expected.verdict === r.verdict ? ' ✓' : ''}` : ''}</td>` : ''}
     <td><button data-replay-at="${r.id}:${r.asked}">Replay</button></td></tr>`).join('')}</table></div>`;
   return { html, mount() {
@@ -1199,6 +1210,29 @@ PAGES.api = async () => {
 };
 
 
+/* sortable tables: click a header to sort by that column, again to reverse ----------- */
+function makeSortable(table) {
+  const head = table.querySelector('tr');
+  if (!head) return;
+  [...head.children].forEach((th, col) => {
+    th.classList.add('sorthead');
+    th.title = 'Sort by this column';
+    th.addEventListener('click', () => {
+      const rows = [...table.querySelectorAll('tr')].slice(1);
+      const dir = th.dataset.dir === 'asc' ? -1 : 1;
+      head.querySelectorAll('th').forEach((h) => { delete h.dataset.dir; });
+      th.dataset.dir = dir === 1 ? 'asc' : 'desc';
+      const val = (tr) => { const td = tr.children[col]; return td ? (td.dataset.sort ?? td.textContent.trim()) : ''; };
+      rows.sort((a, b) => {
+        const x = val(a), y = val(b), nx = parseFloat(x), ny = parseFloat(y);
+        const both = !Number.isNaN(nx) && !Number.isNaN(ny) && /^-?[\d.]/.test(x) && /^-?[\d.]/.test(y);
+        return dir * (both ? nx - ny : x.localeCompare(y, undefined, { numeric: true }));
+      });
+      rows.forEach((tr) => tr.parentNode.appendChild(tr));
+    });
+  });
+}
+
 /* ----------------------------------------------------------------- shell */
 let token = 0;
 async function render() {
@@ -1212,6 +1246,7 @@ async function render() {
     const out = await PAGES[page](parts);
     if (my !== token) return;
     main.innerHTML = out.html;
+    main.querySelectorAll('table.sortable').forEach(makeSortable);
     if (out.mount) out.mount();
   } catch (e) {
     if (my !== token) return;

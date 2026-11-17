@@ -100,8 +100,11 @@ class ScriptedBrain:
             inc = tools.get_incident(cand["id"])
             view = inc.incidents[0]
             suspects = sorted({p["element"] for p in inc.data["parts"] if p["role"] in ("suspected", "cause")})
+            # what its experts blamed can only be checked again when the match involves the same parts;
+            # a same-symptom match on other parts says nothing about those parts now
+            to_check = suspects if cand["signature"] != "symptom" else []
             matched, match_cites, missing = 0, [], []
-            for part in suspects:
+            for part in to_check:
                 st = tools.state(part, now)
                 odd = [s for s in st.entries if s.payload.get("value") not in NORMAL]
                 if odd:
@@ -114,7 +117,7 @@ class ScriptedBrain:
             scored.append({"id": view.id, "title": view.title, "signature": cand["signature"],
                            "shared_parts": cand["shared_parts"], "shared_kinds": cand["shared_kinds"],
                            "recovery_action": view.recovery_action, "confirmed_cause": view.confirmed_cause,
-                           "status": view.status, "suspects": suspects, "missing": missing, **s,
+                           "status": view.status, "suspects": suspects if to_check else [], "missing": missing, **s,
                            "_cites": match_cites, "_recovery": [Citation(e.id, inc.query_id, f"what was done in #{view.id}") for e in recovery]})
 
         # 4. context: what else happened shortly before the first symptom
@@ -139,8 +142,8 @@ class ScriptedBrain:
 
         if best:
             cites += best["_cites"]
-        element = next((c.why.split(" ")[0] for c in (best["_cites"] if best else [])),
-                       best["suspects"][0] if best and best["suspects"] and v != "new" else trigger.part)
+        # the part at fault: one found in the same abnormal state as before; otherwise where the crew sees it
+        element = next((c.why.split(" ")[0] for c in (best["_cites"] if best else [])), trigger.part)
         if v == "known" and best["recovery_action"]:
             step, relied = "recovery_procedure", "recovery_action"
             cites += best["_recovery"]
