@@ -14,7 +14,9 @@ from urllib.parse import parse_qsl, urlparse
 
 from aggregator import RecordStore
 
-from .api import NO_AS_OF, ROUTES, ApiError
+import html
+
+from .api import NO_AS_OF, ROOT, ROUTES, ApiError
 
 STATIC = Path(__file__).with_name("static")
 
@@ -37,6 +39,28 @@ def handle_api(db_path: Path, planted: Optional[Path], route: str, query: dict[s
         store.close()
 
 
+SOURCE_DIRS = ("example_device", "aggregator", "utils", "viewer")
+
+
+def source_page(rel: str) -> Optional[bytes]:
+    """One source file of this project as a page with numbered, linkable lines. Read-only."""
+    target = (ROOT / rel).resolve()
+    allowed = any((ROOT / d).resolve() in target.parents for d in SOURCE_DIRS)
+    if not allowed or target.suffix not in (".py", ".sql") or not target.is_file():
+        return None
+    rows = "".join(f'<tr id="L{n}"><td class="n">{n}</td><td><pre>{html.escape(line) or " "}</pre></td></tr>'
+                   for n, line in enumerate(target.read_text().splitlines(), 1))
+    return (f"<!doctype html><meta charset='utf-8'><title>{html.escape(rel)}</title>"
+            "<style>body{font:13px ui-monospace,Menlo,monospace;margin:0;background:#fcfcfb;color:#0b0b0b}"
+            "h1{font:600 15px system-ui,sans-serif;margin:0;padding:10px 16px;position:sticky;top:0;background:#fcfcfb;"
+            "border-bottom:1px solid #e1e0d9}table{border-collapse:collapse}pre{margin:0}"
+            "tr{scroll-margin-top:48px}td{padding:0 10px;vertical-align:top}td.n{color:#898781;text-align:right;user-select:none}"
+            "tr:target{background:#efedfb}tr:target td.n{color:#6250d6;font-weight:700}"
+            "@media(prefers-color-scheme:dark){body,h1{background:#1a1a19;color:#f0efec}tr:target{background:#24223a}}</style>"
+            f"<h1>{html.escape(rel)} <span style='font-weight:400;color:#898781'>read-only view of the running code</span></h1>"
+            f"<table>{rows}</table>").encode()
+
+
 def make_handler(db_path: Path, planted: Optional[Path]):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -44,6 +68,10 @@ def make_handler(db_path: Path, planted: Optional[Path]):
             if url.path.startswith("/api/"):
                 status, body = handle_api(db_path, planted, url.path[len("/api/"):], dict(parse_qsl(url.query)))
                 self._send(status, json.dumps(body).encode(), "application/json")
+                return
+            if url.path.startswith("/source/"):
+                page = source_page(url.path[len("/source/"):])
+                self._send(200 if page else 404, page or b"not found", "text/html" if page else "text/plain")
                 return
             rel = "index.html" if url.path in ("", "/") else url.path.lstrip("/")
             target = (STATIC / rel).resolve()

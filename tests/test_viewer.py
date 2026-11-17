@@ -133,7 +133,11 @@ def test_service_serves_the_page_and_leaves_the_record_untouched(tiny):
         assert meta["synthetic"] is True and meta["has_planted"] is True
         incidents = json.load(urllib.request.urlopen(f"{base}/api/incidents?as_of={meta['latest_known_at']}"))
         assert len(incidents["incidents"]) == 5
-        for bad in ("/api/incidents", "/../pyproject.toml", "/%2e%2e/%2e%2e/pyproject.toml", "/nope.js"):
+        code = urllib.request.urlopen(base + "/source/example_device/generator.py").read().decode()
+        assert 'id="L1"' in code and "def generate(" in code
+        for bad in ("/api/incidents", "/../pyproject.toml", "/%2e%2e/%2e%2e/pyproject.toml", "/nope.js",
+                    "/source/pyproject.toml", "/source/../pyproject.toml", "/source/tests/conftest.py",
+                    "/source/example_device/../../README.md"):
             with pytest.raises(urllib.error.HTTPError):
                 urllib.request.urlopen(base + bad)
     finally:
@@ -220,3 +224,9 @@ def test_built_page_examples_are_real_rows(call, store, end):
     assert store.get_entry(ex["voltage"]["id"], end).payload == ex["voltage"]["payload"]
     assert body["config"]["ms_cadence_s"] == ex["voltage"]["t_end"] - ex["voltage"]["t_start"]
     assert body["incident_example"]["n_links"] > 0
+    # every "where in the code" link resolves to a real line
+    assert all(spot and spot["line"] > 0 for spot in body["source"].values()), body["source"]
+    # one real direct link and one real indirect link, each with both of its entries
+    direct, indirect = body["links"]["direct"], body["links"]["indirect"]
+    assert direct["link"]["link_type"] == "direct" and direct["src"]["type"] == "downtime" and direct["dst"]["type"] == "run_stop"
+    assert indirect["link"]["link_type"] == "indirect" and indirect["dst"]["type"] == "root_cause" and indirect["link"]["rationale"]

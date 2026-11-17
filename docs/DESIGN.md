@@ -308,6 +308,15 @@ it. The schema needs no change: a plot is one more entry attached to the inciden
 anonymizer, summarizer or sparsifier exists, not even as an interface file, and there is no
 raw data for them to consume.
 
+## 7b. To do
+
+| To do | Why | Touches |
+|---|---|---|
+| **Let an entry or incident name several elements.** Add a table "this entry concerns these elements", each with a role such as affected or suspected. | Every entry and incident names exactly one element today. That was a schema shortcut, not a modelling decision: a real root cause often involves several parts (a box and its supply, or two subsystems). | `aggregator/schema.sql` and the read methods; the detector map and timelines (an entry would appear on every part it names); the "same element" precedent rule (becomes "shares an element"); per-subsystem write rules for entries that span subsystems. Expect sizeable GUI changes. |
+| Entries: more views than the raw table. | Suggested, from low to high level: by type, by element, by run, around a moment, by incident. Awaiting a choice. | `viewer/` only |
+| A working sparsifier fed by a raw series. | Deferred; see 7a. | `example_device/`, a new `sparsifier/` |
+| Incident plots. | See 7a; the project lead will return to it. | schema unchanged |
+
 ## 8. Open questions for the project lead
 
 | # | Question | Blocks |

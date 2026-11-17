@@ -355,6 +355,42 @@ def replay(store: RecordStore, q: dict, ctx: dict) -> dict:
             "precedents": prec.at_moment(store, iid, as_of), "learned": learned}
 
 
+ROOT = Path(__file__).resolve().parent.parent
+# Where in the source each thing on the "how the Record is built" page is done.
+# (file, text that starts the relevant code). Line numbers are looked up when asked,
+# so the links keep pointing at the right place as the code changes.
+SOURCE_SPOTS = {
+    "calendar": ("example_device/plan.py", "def build_plan("),
+    "voltage": ("example_device/generator.py", "# sparsified machine state: one summary per box per window"),
+    "quality": ("example_device/generator.py", "# data-quality summary per run and box; certification per run and subdetector"),
+    "note": ("example_device/texts.py", "T: dict[str, list[str]] = {"),
+    "direct_link": ("example_device/generator.py", "def downtime("),
+    "indirect_link": ("example_device/generator.py", "def conclude("),
+    "incident": ("example_device/generator.py", "def configure_failure("),
+    "write": ("aggregator/store.py", "def add_entry("),
+}
+
+
+def source_spots() -> dict[str, Optional[dict]]:
+    out: dict[str, Optional[dict]] = {}
+    for key, (rel, needle) in SOURCE_SPOTS.items():
+        path = ROOT / rel
+        line = None
+        if path.is_file():
+            line = next((n for n, text in enumerate(path.read_text().splitlines(), 1) if needle in text), None)
+        out[key] = {"file": rel, "line": line, "href": f"/source/{rel}#L{line}"} if line else None
+    return out
+
+
+def _link_example(store: RecordStore, as_of: int, entry_type: str, link_type: str) -> Optional[dict]:
+    for e in store.entries(as_of, types=[entry_type]):
+        for link in store.links(e.id, as_of):
+            if link.link_type == link_type:
+                return {"link": asdict(link), "src": _e(store.get_entry(link.src_entry_id, as_of)),
+                        "dst": _e(store.get_entry(link.dst_entry_id, as_of))}
+    return None
+
+
 def built(store: RecordStore, q: dict, ctx: dict) -> dict:
     """Real rows used as worked examples on the 'how the Record is built' page."""
     as_of = _as_of(q)
@@ -380,7 +416,9 @@ def built(store: RecordStore, q: dict, ctx: dict) -> dict:
             "n_text": sum(n for _, _, t, _, n in by_type if t in text_types),
             "examples": {"voltage": _e(voltage) if voltage else None, "quality": _e(hot) if hot else None,
                          "note": _e(note) if note else None},
-            "incident_example": example}
+            "incident_example": example, "source": source_spots(),
+            "links": {"direct": _link_example(store, as_of, "downtime", "direct"),
+                      "indirect": _link_example(store, as_of, "root_cause", "indirect")}}
 
 
 # ------------------------------------------------------------------ demo-only endpoints

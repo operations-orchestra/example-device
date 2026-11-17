@@ -475,46 +475,64 @@ PAGES.detector = async () => {
 /* 2. how the Record is built --------------------------------------------------------- */
 PAGES.built = async () => {
   const d = await api('built');
-  const ex = d.examples, win = d.config.ms_cadence_s / 60;
+  const ex = d.examples, win = d.config.ms_cadence_s / 60, src = d.source;
   const box = (name, what, state) => `<div class="box ${state}"><b>${name}</b>${what}</div>`;
-  const row = (src, stage, e, demo) => `<tr><td>${src}</td><td>${stage}</td>
-    <td class="mono small what">${e ? `${entryLink(e.id)} · ${esc(e.source)}/${esc(e.type)} · ${esc(e.element)}<br>${esc(JSON.stringify(e.payload))}` : 'none'}</td><td>${demo}</td></tr>`;
+  const code = (key, label) => (src[key] ? ` <a class="code" href="${src[key].href}" target="_blank" rel="noopener">${label || 'code'}: ${esc(src[key].file)}:${src[key].line}</a>` : '');
+  const entryCell = (e) => (e ? `<span class="mono small">entry ${entryLink(e.id)} · ${esc(e.source)}/${esc(e.type)} · ${esc(e.element)}<br>${esc(JSON.stringify(e.payload))}</span>` : 'none in this Record');
+  const linkCell = (x) => (x ? `<span class="mono small">link ${x.link.id} · ${x.link.link_type} · ${esc(x.link.relation)} · ${x.link.status}</span><br>
+      <span class="small">from entry ${entryLink(x.src.id)}: ${esc(describe(x.src))}<br>to entry ${entryLink(x.dst.id)}: ${esc(describe(x.dst))}<br>reason: "${esc(x.link.rationale)}"</span>` : 'none in this Record');
+  const inc = d.incident_example;
+  const row = (what, demo, example, feed) => `<tr><td>${what}</td><td>${demo}</td><td class="what">${example}</td><td>${feed}</td></tr>`;
+  const head = '<tr><th>What</th><th>What the demo does</th><th>Example from this Record</th><th>What the feed would do instead</th></tr>';
   const html = `<h1>How the Record is built</h1>
-  <p class="lead">On a real detector a chain of software, the feed, builds the Record from existing systems. <b>Here that chain does not exist:</b> a generator writes finished entries straight into the Record.</p>
+  <div class="note"><b>The message of this page.</b>
+    <ol><li>On a real detector, a chain of software called the feed builds the Record from existing systems. <b>That chain does not exist here.</b></li>
+    <li>A <b>generator</b> stands in for all of it: it invents a detector history and writes finished entries, links and incidents straight into the Record.</li>
+    <li>So the Record's structure, its rules and everything that reads it are real. Its <b>contents</b>, and <b>every choice the feed would have to make</b>, are the generator's.</li></ol></div>
+
   <div class="pathlabel">As designed, for real records</div>
   <div class="flow">${box('Existing systems', 'controls, data quality, logbook, certification', 'off')}<span class="arrow">&#8594;</span>
     ${box('Adapters', 'read, map to parts', 'off')}<span class="arrow">&#8594;</span>${box('Anonymizer', 'names to roles', 'off')}<span class="arrow">&#8594;</span>
     ${box('Summarizer, sparsifier', 'shorten text, reduce readings', 'off')}<span class="arrow">&#8594;</span>${box('Aggregator', 'writes entries', 'real')}<span class="arrow">&#8594;</span>
     <a class="box real" href="#/tables"><b>The Record</b>${d.counts.entry} entries</a></div>
   <div class="pathlabel">In this demo</div>
-  <div class="flow"><a class="box demo" style="flex:4 1 560px" href="#/scenarios"><b>Generator</b>invents a calendar, plants fault situations, writes everything</a><span class="arrow">&#8594;</span>
+  <div class="flow"><div class="box demo" style="flex:4 1 560px"><b>Generator</b>invents a calendar, plants fault situations, writes everything</div><span class="arrow">&#8594;</span>
     ${box('Aggregator', 'the same code', 'real')}<span class="arrow">&#8594;</span><a class="box real" href="#/tables"><b>The Record</b>the same database</a></div>
-  <div class="key"><span><i class="k-off"></i>dashed: not built</span><span><i class="k-real"></i>blue: runs here</span><span><i class="k-demo"></i>violet: demo only</span></div>
+  <div class="key"><span><i class="k-off"></i>dashed: not built</span><span><i class="k-real"></i>blue: runs here</span><span><i class="k-demo"></i>violet: the generator, demo only</span></div>
 
-  <h2>Three sources, followed into the Record</h2>
-  <div class="tablewrap"><table><tr><th>Source</th><th>What the feed would do</th><th>The entry in this Record</th><th>What the demo does instead</th></tr>
-    ${row('<b>Voltage</b>, logged every few seconds', `Sparsifier: ${win}-minute windows, four numbers each`, ex.voltage, 'Formula plus noise; no raw series exists')}
-    ${row('<b>Data-quality plots</b> per run', 'Sparsifier: a few numbers per run and box', ex.quality, 'Set from the planted faults; no plot exists')}
-    ${row('<b>Logbook note</b>, free text with a name', 'Anonymizer: name to role. Summarizer: shorten', ex.note, 'A hand-written template; never any names')}
+  <div class="genbox">
+  <h2>What the generator does in place of the feed</h2>
+  <p>It first lays out a calendar of fills and runs and decides where each <a href="#/scenarios">planted situation</a> goes${code('calendar')}. Then it writes the Record through the aggregator${code('write')}. Each row below shows one thing it writes, with a real example.</p>
+  <h3>It writes the entries the feed would have produced</h3>
+  <div class="tablewrap"><table>${head}
+    ${row('<b>A voltage reading</b>', `Computes five simulated samples per ${win}-minute window from a formula with noise, keeps four numbers and discards the samples. There is no raw series.${code('voltage')}`, entryCell(ex.voltage),
+      'The <b>sparsifier</b> reduces the control system\'s raw series to a few numbers per window and a pointer to the raw data.')}
+    ${row('<b>Data quality of a run</b>', `Sets five numbers per run and box directly from the planted faults, plus 1% noise. No histogram or plot exists.${code('quality')}`, entryCell(ex.quality),
+      'The <b>sparsifier</b> extracts numbers from data-quality histograms; the <b>summarizer</b> could describe a plot in words.')}
+    ${row('<b>A logbook note</b>', `Picks one of two or three hand-written sentences per situation and fills in names of parts. There are never people's names.${code('note', 'templates')}`, entryCell(ex.note),
+      'The <b>anonymizer</b> replaces names with roles; the <b>summarizer</b> shortens long threads. Both use local language models.')}
   </table></div>
-
-  <h2>On top of entries</h2>
-  <div class="tablewrap"><table>
-    <tr><td><b>Direct link</b></td><td>Same part, same time. Built by code.</td></tr>
-    <tr><td><b>Indirect link</b></td><td>An expert's reasoning: this supports that. Proposed by software, confirmed by an expert.</td></tr>
-    <tr><td><b>Incident</b></td><td>Entries grouped into one problem, with recovery, cause and certification kept apart.${d.incident_example ? ` Example: ${incLink(d.incident_example.incident.id, d.incident_example.incident.title)}.` : ''}</td></tr>
+  <h3>It also writes what experts and software would add on top</h3>
+  <div class="tablewrap"><table>${head}
+    ${row('<b>A direct link</b><br><span class="small muted">same part or time; context, not cause</span>', `Links each downtime row to the run it stopped.${code('direct_link')}`, linkCell(d.links.direct),
+      'The <b>aggregator</b> builds them from shared identifiers and timestamps.')}
+    ${row('<b>An indirect link</b><br><span class="small muted">an expert\'s reasoning</span>', `The fault script writes it as already confirmed, with one fixed sentence as the reason, at the moment the cause is recorded.${code('indirect_link')}`, linkCell(d.links.indirect),
+      'Software <b>proposes</b> which observation supports which conclusion; an <b>expert</b> confirms, corrects or rejects each one.')}
+    ${row('<b>An incident</b><br><span class="small muted">entries grouped into one problem</span>', `Every planted fault gets a complete incident from its script: symptoms, action, recovery, usually a cause.${code('incident', 'one fault script')}`,
+      inc ? `${incLink(inc.incident.id, inc.incident.title)}<br><span class="small">${inc.n_entries} entries, ${inc.n_links} expert links<br>recovery: ${esc(inc.incident.recovery_action || 'none')}<br>cause: ${esc(inc.incident.confirmed_cause || 'none')}</span>` : 'none in this Record',
+      'For selected incidents, the team and the <b>experts</b> who handled them reconstruct the history. The rest are grouped automatically and unreviewed.')}
   </table></div>
-  <p class="muted small">In the demo the generator writes all links and incidents, already confirmed.</p>
+  </div>
 
-  <h2>Choices the demo makes silently</h2>
-  <p class="muted small">Each is a real design decision, not settled. Details are in docs/DESIGN.md, section 7a.</p>
+  <h2>Choices the generator makes on the feed's behalf</h2>
+  <p>Each row is a real design decision that is <b>not settled</b>. The demo fixes it silently; this table is here so nobody mistakes it for decided. Details are in docs/DESIGN.md, section 7a.</p>
   <div class="tablewrap"><table><tr><th>Choice</th><th>In the demo</th><th>What it hides</th></tr>
     <tr><td><b>Sparsifying readings</b></td><td>${win}-minute windows: mean, min, max, slope</td><td>Anything faster than a window; a size limit sets the window</td></tr>
     <tr><td><b>Summarizing data quality</b></td><td>Five numbers per run and box</td><td>Short problems are diluted; position is lost</td></tr>
     <tr><td><b>Plots</b></td><td>None</td><td>Intended: keep an incident's relevant plots, mostly logbook attachments</td></tr>
     <tr><td><b>When quality data arrive</b></td><td>Ten minutes after the run</td><td>Online plots are visible during a run</td></tr>
     <tr><td><b>Logbook text</b></td><td>One templated sentence</td><td>Real notes are long and irregular; matching is harder</td></tr>
-    <tr><td><b>Which part a note is about</b></td><td>Known to the generator</td><td>Must be read from free text</td></tr>
+    <tr><td><b>Which part a record is about</b></td><td>Exactly one part, known to the generator</td><td>Must be read from free text; a cause often involves several parts</td></tr>
     <tr><td><b>How late knowledge arrives</b></td><td>Fixed delays</td><td>Real delays vary; many causes are never written</td></tr>
     <tr><td><b>Complete incidents</b></td><td>Every fault has one</td><td>Only expert-reviewed incidents are this complete</td></tr>
     <tr><td><b>Language models</b></td><td>None used</td><td>The anonymizer and summarizer would use local ones</td></tr>
@@ -531,6 +549,7 @@ PAGES.tables = async () => {
   <p class="lead">The Record is one database with eight tables. A line in the diagram means "this column holds the id of a row in that table". Click a table for its columns and real rows.</p>
   <div class="tablewrap">${erDiagram(d.tables)}</div>
   <div class="note">An <b>element</b> is a part of the detector. An <b>entry</b> is one recorded thing about one element, with two times: when it happened and when the Record learned of it. A <b>link</b> connects two entries. An <b>incident</b> is a problem; <b>incident_entry</b> lists which entries belong to it and in what role. <b>element_relation</b> says which supply powers a box and which FED reads it.</div>
+  <div class="note todo"><b>To do: one part per row is too strict.</b> Every entry, and every incident, names exactly one element. A real root cause often involves several parts, for example a readout box and the supply that powers it. The plan is a further table that lets an entry or incident name several elements, each with a role. Not built yet; it will change the detector map, the timelines and the "same element" precedent rule.</div>
   <h2>One incident, followed through the tables</h2>
   ${w ? `<div class="filters"><label>Incident <select id="tb-inc">${d.incidents.map((i) => `<option value="${i.id}"${i.id === d.incident_id ? ' selected' : ''}>#${i.id} ${esc(i.title)}</option>`).join('')}</select></label> <a href="#/incident/${d.incident_id}">open its page</a></div>
   <h3>1. One row in <span class="mono">incident</span></h3>${rawTable(w.incident, ['id', 'element_id'])}

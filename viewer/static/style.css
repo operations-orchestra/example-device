@@ -134,3 +134,9 @@ svg .future { fill: var(--grid); opacity: .45; }
 main details { border: 1px solid var(--grid); border-radius: 8px; padding: 2px 12px; margin: 10px 0; background: var(--surface); } main details[open] { padding-bottom: 10px; }
 .pathlabel { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 2px; }
 .key i.k-off { border: 1px dashed var(--ink2); height: 9px; background: none; } .key i.k-real { background: var(--accent); } .key i.k-demo { background: var(--demo); }
+
+.genbox { border: 2px solid var(--demo); border-left-width: 5px; border-radius: 8px; padding: 2px 16px 14px; margin: 18px 0; background: var(--demo-bg); }
+.genbox h2 { margin-top: 14px; } .genbox table { background: var(--surface); }
+a.code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: nowrap; border: 1px solid var(--axis); border-radius: 4px; padding: 0 5px; background: var(--surface); }
+.note ol { margin: 6px 0 2px; padding-left: 22px; } .note li { margin: 4px 0; max-width: 92ch; }
+.note.todo { border-left-color: var(--s4); }

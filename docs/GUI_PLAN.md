@@ -333,9 +333,21 @@ to this moment, "has this been seen before", the entries, and the answer key. Th
 and timeline sections call the same drawing functions as the full pages (`mapSvg`,
 `mountTimeline`) with the same as-of data.
 
-**"How the Record is built" was cut down** after review to a diagram, one table following
-three sources into real entries, three lines on links and incidents, and a short table of
-the choices the demo makes silently. The longer explanations are in DESIGN.md section 7a.
+**"How the Record is built"** went through two rounds of review. It now opens with its
+message in three numbered statements (the feed does not exist here; a generator stands in
+for it; so structure is real, contents and the feed's choices are the generator's). Below
+the two-path diagram, a box in the generator's colour holds two tables, "It writes the
+entries the feed would have produced" and "It also writes what experts and software would
+add on top". Their columns are: what, what the demo does, an example from this Record,
+what the feed would do instead. Every row has a real example (an entry, a direct link, an
+indirect link, an incident) and a link to the code that does it. Guidance from the review:
+details may be shortened, the message may not; show examples and people will get it.
+
+**Source links.** `/source/<file>#L<line>` shows one project source file with numbered
+lines, read-only, limited to `.py` and `.sql` files under the four package folders. Line
+numbers are looked up from a marker text at request time (`SOURCE_SPOTS` in
+`viewer/api.py`), so links follow the code as it changes; a test checks each marker is
+found. GitHub links were not used because the branch is not pushed.
 
 **What a replay shows before the incident is opened.** Only the problem's symptoms: they
 are what the crew is looking at. Evidence that an expert attaches later is not listed
