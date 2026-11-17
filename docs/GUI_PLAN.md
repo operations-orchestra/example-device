@@ -318,11 +318,24 @@ Record is, then browse it, then replay.
 | - | For developers: read API | Linked from the foot of the navigation. |
 
 **Replay is a mode.** Outside it, every read is made as of the end of the Record and no
-time wording appears; an empty label reads "none recorded". Starting a replay (from the
-Replay page, an incident, or a scenario) shows a bar with the moment, previous and next
-step, Play, three jumps and Exit. While it is on, every page shows the Record as it stood
-then, and an empty label reads "not known yet". A step is the next moment the Record
-learned something about the incident being followed. Steps are times only.
+time wording appears; an empty label reads "none recorded". A replay is started from the
+Replay page, an incident, or a scenario. While it is on, every page shows the Record as it
+stood then, an empty label reads "not known yet", and a slim banner on every page says so,
+with "Back to the replay" and "Exit replay". A step is the next moment the Record learned
+something about the incident being followed. Steps are times only.
+
+**The replay page holds the controls** (changed after review; there is no control bar at
+the top). In order: previous step, next step, Play and three jumps; then one chart with a
+row of step marks (past filled, current highlighted, later ones hollow and clickable) above
+the happened and known rows, with the future shaded; what the Record says now and what the
+last step added; then collapsible sections for the detector at this moment, the timeline up
+to this moment, "has this been seen before", the entries, and the answer key. The detector
+and timeline sections call the same drawing functions as the full pages (`mapSvg`,
+`mountTimeline`) with the same as-of data.
+
+**"How the Record is built" was cut down** after review to a diagram, one table following
+three sources into real entries, three lines on links and incidents, and a short table of
+the choices the demo makes silently. The longer explanations are in DESIGN.md section 7a.
 
 **What a replay shows before the incident is opened.** Only the problem's symptoms: they
 are what the crew is looking at. Evidence that an expert attaches later is not listed

@@ -89,24 +89,25 @@ function drawBar() {
   bar.hidden = !S.replay;
   if (!S.replay) return;
   const r = S.replay;
+  bar.innerHTML = `<div class="clock-row"><b>${r.id ? `Replay of incident #${r.id} is on.` : 'Looking at a past moment.'}</b>
+    <span>Every page shows the Record as it stood at <b>${fmt(S.asOf)}</b> UTC, and nothing learned later.</span>
+    <span class="spacer"></span><a href="#/replay">Back to the replay</a><button id="rp-exit">Exit replay</button></div>`;
+  $('#rp-exit').addEventListener('click', exitReplay);
+}
+/* the step controls, shown on the replay page itself */
+function stepControls() {
+  const r = S.replay;
   const done = r.steps ? r.steps.filter((x) => x <= S.asOf).length : null;
-  bar.innerHTML = `<div class="clock-row">
-    <span class="clock-label">${r.id ? `Replaying incident #${r.id}` : 'Looking at a past moment'}</span>
-    <span>The Record as it stood at</span>
-    <input id="clock-text" type="text" spellcheck="false" aria-label="Moment, UTC" value="${fmt(S.asOf)}"><span class="muted">UTC</span>
-    <button id="rp-prev">&#9664; previous step</button><button id="rp-next">next step &#9654;</button>
-    ${r.steps ? `<button id="rp-play" class="primary">${playTimer ? 'Stop' : 'Play'}</button><span class="muted small">step ${done} of ${r.steps.length}</span>` : ''}
-    <span class="spacer"></span>
+  return `<div class="filters stepper"><button id="rp-prev">&#9664; previous step</button><button id="rp-next" class="primary">next step &#9654;</button>
+    ${r.steps ? `<button id="rp-play">${playTimer ? 'Stop' : 'Play'}</button><span class="muted">step ${done} of ${r.steps.length}</span>` : ''}
+    <span class="spacer"></span><span class="muted small">Jump to:</span>
     ${r.id ? `<button data-asof="${r.ask}" title="Five minutes after the first symptom reached the Record">when the crew asks</button>` : ''}
     ${r.opened ? `<button data-asof="${r.opened}">incident opened</button>` : ''}
-    <button data-asof="${S.meta.latest_known_at}">everything known</button>
-    <a href="#/replay">replay page</a>
-    <button id="rp-exit" class="primary">Exit replay</button></div>
-    <div class="small muted">Every page now shows only what the Record knew at this moment. A step is the next moment the Record learned something${r.id ? ' about this incident' : ''}.</div>`;
-  $('#clock-text').addEventListener('change', (ev) => { const t = parseT(ev.target.value); if (t == null) ev.target.value = fmt(S.asOf); else setAsOf(t); });
+    <button data-asof="${S.meta.latest_known_at}">everything known</button></div>`;
+}
+function wireSteps() {
   $('#rp-prev').addEventListener('click', () => step('previous'));
   $('#rp-next').addEventListener('click', () => step('next'));
-  $('#rp-exit').addEventListener('click', exitReplay);
   if ($('#rp-play')) $('#rp-play').addEventListener('click', () => {
     if (playTimer) { stopPlay(); render(); return; }
     playTimer = setInterval(() => step('next'), 1800); render();
@@ -386,12 +387,14 @@ function rawTable(t, highlight) {
 
 const ROLE_CLASS = { symptom: 'c1', downtime: 'c2', action: 'c3', certification: 'c4', cause: 'c5', closing_note: 'c5', evidence: 'c7' };
 const ROLE_LABEL = { symptom: 'symptom', downtime: 'downtime', action: 'action taken', certification: 'certification', cause: 'cause or closing note', evidence: 'evidence linked by an expert' };
-function knowledgeChart(inc, entries, width) {
+function knowledgeChart(inc, entries, width, steps) {
   // Time is drawn relative to the start of the incident on a compressed scale, so minutes
   // and weeks fit on one axis: equal distance means ten times longer.
   const f = (dt) => Math.sign(dt) * Math.log10(1 + Math.abs(dt) / 60);
-  const L = 118, R = 20, W = Math.max(520, width), yTop = 56, yBot = 170, H = 232;
-  const all = entries.flatMap((e) => [e.t_start - inc.t_start, e.known_at - inc.t_start]).concat(S.replay ? [S.asOf - inc.t_start, 0] : [0]);
+  const off = steps ? 44 : 0;
+  const L = 118, R = 20, W = Math.max(520, width), yTop = 56 + off, yBot = 170 + off, H = 232 + off;
+  const all = entries.flatMap((e) => [e.t_start - inc.t_start, e.known_at - inc.t_start]).concat(S.replay ? [S.asOf - inc.t_start, 0] : [0])
+    .concat(steps ? steps.map((t) => t - inc.t_start) : []);
   const lo = f(Math.min(...all)) - 0.2, hi = f(Math.max(...all)) + 0.2;
   const X = (dt) => L + ((f(dt) - lo) / (hi - lo)) * (W - L - R);
   let s = `<text x="${L - 8}" y="${yTop + 4}" text-anchor="end">Happened</text><text x="${L - 8}" y="${yBot + 4}" text-anchor="end">Known</text>
@@ -400,15 +403,27 @@ function knowledgeChart(inc, entries, width) {
     [600, '+10 min'], [3600, '+1 h'], [6 * 3600, '+6 h'], [86400, '+1 d'], [7 * 86400, '+1 wk'], [14 * 86400, '+2 wk'], [28 * 86400, '+4 wk']];
   for (const [dt, label] of marks) {
     if (f(dt) < lo || f(dt) > hi) continue;
-    s += `<line class="grid" x1="${X(dt)}" x2="${X(dt)}" y1="${yTop - 14}" y2="${yBot + 14}"/><text x="${X(dt)}" y="${yBot + 30}" text-anchor="middle">${label}</text>`;
+    s += `<line class="grid" x1="${X(dt)}" x2="${X(dt)}" y1="${yTop - 14 - off}" y2="${yBot + 14}"/><text x="${X(dt)}" y="${yBot + 30}" text-anchor="middle">${label}</text>`;
+  }
+  if (S.replay) {
+    const xn = X(S.asOf - inc.t_start);
+    s += `<rect class="future" x="${xn}" y="${yTop - 14 - off}" width="${Math.max(0, W - R - xn)}" height="${yBot - yTop + 28 + off}"/>
+      <line class="asof" x1="${xn}" x2="${xn}" y1="${yTop - 14 - off}" y2="${yBot + 14}"/>`;
+  }
+  if (steps) {
+    const ys = yTop - off + 2;
+    s += `<text x="${L - 8}" y="${ys + 4}" text-anchor="end">Steps</text><line class="axis" x1="${L}" x2="${W - R}" y1="${ys}" y2="${ys}"/>`;
+    steps.forEach((t, k) => {
+      const here = t === S.asOf, past = t <= S.asOf;
+      s += `<circle class="hit step${here ? ' here' : past ? ' past' : ''}" cx="${X(t - inc.t_start)}" cy="${ys}" r="${here ? 8 : 5.5}" data-asof="${t}" data-tip="step ${k + 1}: ${fmt(t)}${past ? '' : '\n(later: click to go there)'}"/>`;
+    });
   }
   for (const e of entries) {
     const cls = e.role ? (ROLE_CLASS[e.role] || 'c1') : 'c0', a = X(e.t_start - inc.t_start), b = X(e.known_at - inc.t_start);
-    const tip = `${e.role || 'not yet linked to an incident'}: ${describe(e)}\nhappened ${fmt(e.t_start)}\nknown ${fmt(e.known_at)} (${dur(e.known_at - e.t_start)} later)`;
+    const tip = `${e.role || 'symptom, not yet linked to an incident'}: ${describe(e)}\nhappened ${fmt(e.t_start)}\nknown ${fmt(e.known_at)} (${dur(e.known_at - e.t_start)} later)`;
     s += `<g class="hit ${cls}" data-go="#/entry/${e.id}" data-tip="${esc(tip)}"><line x1="${a}" y1="${yTop}" x2="${b}" y2="${yBot}" stroke-width="2" opacity=".75"/>
       <circle cx="${a}" cy="${yTop}" r="5" stroke="var(--surface)" stroke-width="2"/><circle cx="${b}" cy="${yBot}" r="5" stroke="var(--surface)" stroke-width="2"/></g>`;
   }
-  if (S.replay) s += `<line class="asof" x1="${X(S.asOf - inc.t_start)}" x2="${X(S.asOf - inc.t_start)}" y1="${yTop - 20}" y2="${yBot + 14}"/><text x="${X(S.asOf - inc.t_start)}" y="${yTop - 26}" text-anchor="end">now in the replay</text>`;
   return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="when each entry happened and when it became known">${s}</svg>`;
 }
 
@@ -458,64 +473,52 @@ PAGES.detector = async () => {
 };
 
 /* 2. how the Record is built --------------------------------------------------------- */
-function rowCard(e) {
-  if (!e) return '<p class="muted">No such entry in this Record.</p>';
-  return `<dl class="facts mono small"><dt>entry</dt><dd>${entryLink(e.id)}</dd><dt>source / type</dt><dd>${esc(e.source)} / ${esc(e.type)}</dd><dt>element</dt><dd>${esc(e.element)}</dd>
-    <dt>happened</dt><dd>${fmt(e.t_start)}${e.t_end ? ' to ' + fmt(e.t_end) : ''}</dd><dt>known</dt><dd>${fmt(e.known_at)}</dd>
-    <dt>payload</dt><dd>${esc(JSON.stringify(e.payload))}</dd></dl>`;
-}
 PAGES.built = async () => {
   const d = await api('built');
-  const ex = d.examples, win = d.config.ms_cadence_s;
-  const stage = (name, what, state) => `<div class="box ${state}"><b>${name}</b>${what}<br><span class="small">${state === 'off' ? 'not built' : state === 'real' ? 'runs here' : 'demo only'}</span></div>`;
-  const example = (title, source, stageText, e, demo) => `<h3>${title}</h3>
-    <div class="three"><div class="card"><b>The source, on a real detector</b><p>${source}</p></div>
-    <div class="card"><b>What the feed would do</b><p>${stageText}</p></div>
-    <div class="card"><b>The entry in this Record</b>${rowCard(e)}<p class="small muted">In this demo: ${demo}</p></div></div>`;
+  const ex = d.examples, win = d.config.ms_cadence_s / 60;
+  const box = (name, what, state) => `<div class="box ${state}"><b>${name}</b>${what}</div>`;
+  const row = (src, stage, e, demo) => `<tr><td>${src}</td><td>${stage}</td>
+    <td class="mono small what">${e ? `${entryLink(e.id)} · ${esc(e.source)}/${esc(e.type)} · ${esc(e.element)}<br>${esc(JSON.stringify(e.payload))}` : 'none'}</td><td>${demo}</td></tr>`;
   const html = `<h1>How the Record is built</h1>
-  <p class="lead">On a real detector, the Record is built from existing systems by a chain of software called the feed. <b>In this demo that chain does not exist.</b> A generator invents a detector history and writes the finished entries straight into the Record.</p>
-  <h2>The two paths</h2>
-  <p class="muted small">Top: the path for real records, as designed. Bottom: what runs in this demo.</p>
-  <div class="flow"><div class="box off"><b>Existing systems</b>control system, data-quality monitoring, logbook, certification, downtime, run control</div><span class="arrow">&#8594;</span>
-    ${stage('Adapters', 'read each system, map records to detector parts', 'off')}<span class="arrow">&#8594;</span>
-    ${stage('Anonymizer', 'replaces names with roles', 'off')}<span class="arrow">&#8594;</span>
-    ${stage('Summarizer and sparsifier', 'shorten text; reduce bulk readings to a few numbers', 'off')}<span class="arrow">&#8594;</span>
-    ${stage('Aggregator', 'writes entries, builds links', 'real')}<span class="arrow">&#8594;</span>
+  <p class="lead">On a real detector a chain of software, the feed, builds the Record from existing systems. <b>Here that chain does not exist:</b> a generator writes finished entries straight into the Record.</p>
+  <div class="pathlabel">As designed, for real records</div>
+  <div class="flow">${box('Existing systems', 'controls, data quality, logbook, certification', 'off')}<span class="arrow">&#8594;</span>
+    ${box('Adapters', 'read, map to parts', 'off')}<span class="arrow">&#8594;</span>${box('Anonymizer', 'names to roles', 'off')}<span class="arrow">&#8594;</span>
+    ${box('Summarizer, sparsifier', 'shorten text, reduce readings', 'off')}<span class="arrow">&#8594;</span>${box('Aggregator', 'writes entries', 'real')}<span class="arrow">&#8594;</span>
     <a class="box real" href="#/tables"><b>The Record</b>${d.counts.entry} entries</a></div>
-  <div class="flow"><div class="box demo" style="flex:4 1 600px"><b>Generator</b>invents a calendar of fills and runs, plants a handful of fault situations, and writes routine readings, events, logbook notes, flags, incidents and links. Same seed, same Record. <a href="#/scenarios">See the planted situations.</a><br><span class="small">demo only: stands in for everything to its left on the top path</span></div><span class="arrow">&#8594;</span>
-    ${stage('Aggregator', 'the same write code', 'real')}<span class="arrow">&#8594;</span><a class="box real" href="#/tables"><b>The Record</b>the same database</a></div>
-  <p>So the Record's shape, its rules (two times per entry, nothing overwritten) and everything that reads it are real. Its contents are invented, and the choices the feed would make are fixed by the generator. Those choices are listed at the bottom of this page.</p>
+  <div class="pathlabel">In this demo</div>
+  <div class="flow"><a class="box demo" style="flex:4 1 560px" href="#/scenarios"><b>Generator</b>invents a calendar, plants fault situations, writes everything</a><span class="arrow">&#8594;</span>
+    ${box('Aggregator', 'the same code', 'real')}<span class="arrow">&#8594;</span><a class="box real" href="#/tables"><b>The Record</b>the same database</a></div>
+  <div class="key"><span><i class="k-off"></i>dashed: not built</span><span><i class="k-real"></i>blue: runs here</span><span><i class="k-demo"></i>violet: demo only</span></div>
 
-  <h2>Three kinds of source, followed into the Record</h2>
-  ${example('A voltage reading', 'The control system logs the supply voltage of each box every few seconds: far too much to copy.',
-    `The <b>sparsifier</b> cuts time into windows and keeps a few numbers per window plus a pointer to the raw data. Here a window is <b>${win / 60} minutes</b> and the numbers are <b>mean, minimum, maximum and slope</b>.`,
-    ex.voltage, 'the generator computes five simulated samples per window from a formula with noise, writes these four numbers and discards the samples. There is no raw series.')}
-  ${example('A data-quality plot', 'Data-quality monitoring fills occupancy maps and many other histograms for every run.',
-    'The <b>sparsifier</b> would extract numbers from the histograms; the <b>summarizer</b> could describe what a plot shows. Here there is one row per run and box with the dead fraction, the worst lumisection, the hot fraction and the mean occupancy.',
-    ex.quality, 'the generator sets these numbers directly from the planted faults plus 1% noise. No histogram or image exists.')}
-  ${example('A logbook note', 'A shifter or expert writes free text in the electronic logbook, under their name, often with plots attached.',
-    'The <b>anonymizer</b> replaces the author and any names in the text with operational roles and keeps no key. The <b>summarizer</b> shortens long threads. In production both use locally hosted language models.',
-    ex.note, 'the text is one of two or three hand-written templates per situation. There were never names, and no language model is used anywhere in this demo.')}
-
-  <h2>On top of the entries: links and incidents</h2>
-  <div class="three"><div class="card"><b>Direct links</b><p>Two entries about the same part at the same time. Built by code from shared identifiers. They give context, not cause.</p></div>
-    <div class="card"><b>Indirect links</b><p>An expert's reasoning: this observation supports that conclusion, with the reason stated. In production, software proposes them and an expert confirms or rejects each one.</p></div>
-    <div class="card"><b>Incidents</b><p>Entries grouped into one problem, with three separate labels: what restored running, the confirmed cause, and whether the data were usable. In production only incidents that experts have reviewed are this complete.</p></div></div>
-  ${d.incident_example ? `<p>Example: ${incLink(d.incident_example.incident.id, d.incident_example.incident.title)} groups ${d.incident_example.n_entries} entries and has ${d.incident_example.n_links} expert links. In this demo the generator's fault script wrote all of it, already confirmed.</p>` : ''}
-
-  <h2>Choices the demo makes on the feed's behalf</h2>
-  <p>Each of these is a real design decision that the demo fixes silently. They are listed so nobody mistakes them for settled.</p>
-  <div class="tablewrap"><table><tr><th>Choice</th><th>What the demo does</th><th>What it hides</th></tr>
-    <tr><td><b>How readings are sparsified</b></td><td>${win / 60}-minute windows; mean, minimum, maximum, slope. The window is widened automatically when the file would exceed its size budget.</td><td>Anything faster than a window is lost. The slope inside one window is about as large as the noise. A storage limit is deciding what the Record can represent. Whether diagnoses survive this compression cannot be tested here, because no full-resolution data exists.</td></tr>
-    <tr><td><b>How data quality is summarized</b></td><td>One row per run and box, five numbers.</td><td>A short problem inside a long run is diluted. Where in the detector a hot spot sits is lost. There is nothing to compare against except "normal = 1".</td></tr>
-    <tr><td><b>Plots</b></td><td>None. Logbook notes mention plots that do not exist.</td><td>The intended design: the Record keeps the plots relevant to an incident, a tiny fraction of all plots. Ideally the logbook entry references the plot and the Record stores a pointer; in practice it will mostly be the images attached to logbook entries.</td></tr>
-    <tr><td><b>When data-quality numbers become known</b></td><td>Ten minutes after the run ends.</td><td>On a real detector online plots are visible during the run. Here a crew asking five minutes into a fault finds no quality information for the current run.</td></tr>
-    <tr><td><b>Logbook text</b></td><td>One sentence from a small set of templates.</td><td>Real notes are long, irregular and incomplete. Finding an earlier occurrence by its wording is far easier here than it will be.</td></tr>
-    <tr><td><b>Which part a note is about</b></td><td>Set by the generator, which knows where it planted the fault.</td><td>For free text this must be worked out by reading it.</td></tr>
-    <tr><td><b>How late knowledge arrives</b></td><td>Fixed delays: minutes for notes, 1 to 3 days for certification, days to weeks for causes.</td><td>Real delays vary widely, and many causes are never written down.</td></tr>
-    <tr><td><b>How complete incidents are</b></td><td>Every planted fault has a full incident with recovery, and usually a cause and expert links.</td><td>In production only the incidents experts reconstruct look like this; the rest are grouped automatically and unreviewed.</td></tr>
+  <h2>Three sources, followed into the Record</h2>
+  <div class="tablewrap"><table><tr><th>Source</th><th>What the feed would do</th><th>The entry in this Record</th><th>What the demo does instead</th></tr>
+    ${row('<b>Voltage</b>, logged every few seconds', `Sparsifier: ${win}-minute windows, four numbers each`, ex.voltage, 'Formula plus noise; no raw series exists')}
+    ${row('<b>Data-quality plots</b> per run', 'Sparsifier: a few numbers per run and box', ex.quality, 'Set from the planted faults; no plot exists')}
+    ${row('<b>Logbook note</b>, free text with a name', 'Anonymizer: name to role. Summarizer: shorten', ex.note, 'A hand-written template; never any names')}
   </table></div>
-  <p class="muted small">Of the ${d.counts.entry} entries, ${d.n_text} hold text or human judgments; the rest are readings, states and events.</p>`;
+
+  <h2>On top of entries</h2>
+  <div class="tablewrap"><table>
+    <tr><td><b>Direct link</b></td><td>Same part, same time. Built by code.</td></tr>
+    <tr><td><b>Indirect link</b></td><td>An expert's reasoning: this supports that. Proposed by software, confirmed by an expert.</td></tr>
+    <tr><td><b>Incident</b></td><td>Entries grouped into one problem, with recovery, cause and certification kept apart.${d.incident_example ? ` Example: ${incLink(d.incident_example.incident.id, d.incident_example.incident.title)}.` : ''}</td></tr>
+  </table></div>
+  <p class="muted small">In the demo the generator writes all links and incidents, already confirmed.</p>
+
+  <h2>Choices the demo makes silently</h2>
+  <p class="muted small">Each is a real design decision, not settled. Details are in docs/DESIGN.md, section 7a.</p>
+  <div class="tablewrap"><table><tr><th>Choice</th><th>In the demo</th><th>What it hides</th></tr>
+    <tr><td><b>Sparsifying readings</b></td><td>${win}-minute windows: mean, min, max, slope</td><td>Anything faster than a window; a size limit sets the window</td></tr>
+    <tr><td><b>Summarizing data quality</b></td><td>Five numbers per run and box</td><td>Short problems are diluted; position is lost</td></tr>
+    <tr><td><b>Plots</b></td><td>None</td><td>Intended: keep an incident's relevant plots, mostly logbook attachments</td></tr>
+    <tr><td><b>When quality data arrive</b></td><td>Ten minutes after the run</td><td>Online plots are visible during a run</td></tr>
+    <tr><td><b>Logbook text</b></td><td>One templated sentence</td><td>Real notes are long and irregular; matching is harder</td></tr>
+    <tr><td><b>Which part a note is about</b></td><td>Known to the generator</td><td>Must be read from free text</td></tr>
+    <tr><td><b>How late knowledge arrives</b></td><td>Fixed delays</td><td>Real delays vary; many causes are never written</td></tr>
+    <tr><td><b>Complete incidents</b></td><td>Every fault has one</td><td>Only expert-reviewed incidents are this complete</td></tr>
+    <tr><td><b>Language models</b></td><td>None used</td><td>The anonymizer and summarizer would use local ones</td></tr>
+  </table></div>`;
   return { html };
 };
 
@@ -683,24 +686,10 @@ PAGES.timeline = async (parts) => {
   <li>Dead channels, hot channels and occupancy are one entry per run, drawn as a flat segment across the run.</li>
   <li>The rows at the bottom are other entries: downtime, certified-bad ranges, state changes, fault events and logbook notes. Hover to read one, click to open it. Dashed lines are incidents.</li>
   <li>Drag across the chart to zoom into a time range; double-click to see everything. "Typical range" ignores the most extreme 5% at each end, so a small drift stays visible next to a trip to zero.</li></ul></details>`;
-  const rowsOf = () => d.strip.map((r) => ({ label: r.row, items: r.items.map((it) => ({
-    t0: it.t0, ...(r.row === 'Stable beams' || r.row === 'Downtime' || r.row === 'Certified bad' ? { t1: it.t1 ?? null } : {}),
-    cls: { 'Stable beams': 'beam', Downtime: 'down', 'Certified bad': 'bad', 'State change': 'mk', 'Fault event': it.planned ? 'mk' : 'mk crit', 'Logbook note': it.routine ? 'note routine' : 'note' }[r.row],
-    shape: { 'State change': 'diamond', 'Fault event': 'tri', 'Logbook note': 'tick' }[r.row],
-    tip: `${fmt(it.t0)}\n${it.text}`, go: `#/entry/${it.id}` })) }));
   return { html, mount() {
-    const host = $('#tl');
-    const draw = () => {
-      const cfg = { t0: TL.t0, t1: TL.t1, width: host.clientWidth, typical: TL.typical, panels: d.panels, rows: rowsOf(),
-        vlines: d.incidents.map((i) => ({ t: i.t_start, cls: 'inc', label: `#${i.id}`, tip: `${i.title} (${i.status})`, go: `#/incident/${i.id}` })).concat(S.replay ? [{ t: S.asOf, cls: 'asof' }] : []),
-        aria: `readings and recorded events for ${name}` };
-      const chart = buildChart(cfg);
-      host.innerHTML = chart.svg;
-      wireChart(host, chart, cfg, { zoom: (a, b) => { TL.t0 = a; TL.t1 = b; draw(); }, reset: () => { TL.t0 = d.t0; TL.t1 = d.t1; draw(); } });
-    };
-    draw();
+    const redraw = mountTimeline($('#tl'), d, TL, name);
     $('#tl-el').addEventListener('change', (ev) => { location.hash = `#/timeline/${encodeURIComponent(ev.target.value)}`; });
-    $('#tl-typ').addEventListener('change', (ev) => { TL.typical = ev.target.checked; draw(); });
+    $('#tl-typ').addEventListener('change', (ev) => { TL.typical = ev.target.checked; redraw(); });
     document.querySelectorAll('[data-tl]').forEach((b) => b.addEventListener('click', () => {
       const w = TL.t1 - TL.t0, mid = (TL.t0 + TL.t1) / 2, a = b.dataset.tl;
       if (a === 'in') { TL.t0 = mid - w / 4; TL.t1 = mid + w / 4; }
@@ -709,10 +698,28 @@ PAGES.timeline = async (parts) => {
       if (a === 'right') { TL.t0 += w / 3; TL.t1 += w / 3; }
       if (a === 'all') { TL.t0 = d.t0; TL.t1 = d.t1; }
       TL.t0 = Math.round(Math.max(d.t0 - 86400, TL.t0)); TL.t1 = Math.round(Math.min(d.t1 + 86400, TL.t1));
-      draw();
+      redraw();
     }));
   } };
 };
+/* Draws the readings-and-records chart into a host. Used by the Timeline page and by Replay. */
+function mountTimeline(host, d, view, name) {
+  const rows = d.strip.map((r) => ({ label: r.row, items: r.items.map((it) => ({
+    t0: it.t0, ...(r.row === 'Stable beams' || r.row === 'Downtime' || r.row === 'Certified bad' ? { t1: it.t1 ?? null } : {}),
+    cls: { 'Stable beams': 'beam', Downtime: 'down', 'Certified bad': 'bad', 'State change': 'mk', 'Fault event': it.planned ? 'mk' : 'mk crit', 'Logbook note': it.routine ? 'note routine' : 'note' }[r.row],
+    shape: { 'State change': 'diamond', 'Fault event': 'tri', 'Logbook note': 'tick' }[r.row],
+    tip: `${fmt(it.t0)}\n${it.text}`, go: `#/entry/${it.id}` })) }));
+  const draw = () => {
+    const cfg = { t0: view.t0, t1: view.t1, width: host.clientWidth, typical: view.typical, panels: d.panels, rows,
+      vlines: d.incidents.map((i) => ({ t: i.t_start, cls: 'inc', label: `#${i.id}`, tip: `${i.title} (${i.status})`, go: `#/incident/${i.id}` })).concat(S.replay ? [{ t: S.asOf, cls: 'asof' }] : []),
+      aria: `readings and recorded events for ${name}` };
+    const chart = buildChart(cfg);
+    host.innerHTML = chart.svg;
+    wireChart(host, chart, cfg, { zoom: (a, b) => { view.t0 = a; view.t1 = b; draw(); }, reset: () => { view.t0 = d.t0; view.t1 = d.t1; draw(); } });
+  };
+  draw();
+  return draw;
+}
 
 /* 4. scenarios in this demo ---------------------------------------------------------- */
 const DV = { mode: null, idx: 0 };
@@ -786,41 +793,72 @@ PAGES.replay = async () => {
   if (r.id == null) {
     const d = r.prev != null && r.prev < S.asOf ? await api('diff', { since: r.prev }) : null;
     const html = `<h1>The Record at ${fmt(S.asOf)}</h1>
-    <p class="lead">You are looking at a past moment without following a particular incident. Use the other pages to see what the Record held then.</p>
-    <p><a href="#/detector">The detector at this moment</a> · <a href="#/incidents">Incidents on record</a> · <a href="#/record">Entries</a> · <a href="#/timeline">Timeline</a></p>
+    <p class="lead">A past moment, without following a particular incident. A step is the next moment the Record learned anything.</p>
+    ${stepControls()}
+    ${replaySections(null)}
     ${d ? `<h2>Learned in the last step</h2><p>${d.n_entries} entries, ${d.n_links} links, ${d.incident_changes.length} incident changes since ${fmt(d.from)}.</p>
       ${d.incident_changes.length ? '<ul>' + d.incident_changes.map((c) => `<li>${fmt(c.t)} · ${incLink(c.incident_id, c.title)}: ${esc(c.what)}</li>`).join('') + '</ul>' : ''}
       <div class="tablewrap"><table><tr>${ENTRY_HEAD}</tr>${entryRows(d.entries)}</table></div>` : ''}`;
-    return { html };
+    return { html, mount() { wireSteps(); mountReplaySections(null); } };
   }
   const d = await api('replay', r.prev != null && r.prev < S.asOf ? { id: r.id, since: r.prev } : { id: r.id });
   const i = d.incident, f = d.frame, p = d.precedents;
   const caseFor = pl ? pl.cases.find((c) => c.incident_id === r.id) : null;
+  const roles = [...new Set(d.entries.filter((e) => e.role).map((e) => (e.role === 'closing_note' ? 'cause' : e.role)))];
   const html = `<h1>Replay of incident #${f.id}: ${esc(f.title)}</h1>
-  <p class="lead">The problem starts at ${fmt(f.t_start)}. You are at <b>${fmt(S.asOf)}</b>, ${dur(S.asOf - f.t_start)} ${S.asOf >= f.t_start ? 'after' : 'before'} the start.</p>
+  <p class="lead">The problem starts at ${fmt(f.t_start)}. You are at <b>${fmt(S.asOf)}</b>, ${dur(Math.abs(S.asOf - f.t_start))} ${S.asOf >= f.t_start ? 'after' : 'before'} the start.</p>
+  ${stepControls()}
+  <h2>How knowledge has arrived so far</h2>
+  <p class="muted small">Top row: each step is a moment the Record learned something about this incident; click one to go there. Below, each entry is drawn when it happened and when it became known. The shaded part is still in the future. The scale is compressed: each step to the right is about ten times longer.</p>
+  <div class="key"><span><i class="c0"></i>a symptom on record, not yet linked to an incident</span>${roles.map((x) => `<span><i class="${ROLE_CLASS[x]}"></i>${ROLE_LABEL[x] || x}</span>`).join('')}</div>
+  <div id="know"></div>
   <div class="cols"><div class="card"><b>What the Record says about this problem now</b>
     ${i ? `<dl class="facts"><dt>Status</dt><dd>${statusCell(i.status)}</dd><dt>Recovery action</dt><dd>${i.recovery_action ? esc(i.recovery_action) : empty()}</dd>
       <dt>Confirmed cause</dt><dd>${i.confirmed_cause ? esc(i.confirmed_cause) : empty()}</dd><dt>Certification</dt><dd>${i.certification ? esc(i.certification) : empty()}</dd></dl>`
       : `<p>Nothing yet as an incident. ${d.entries.length} symptom entries are on record, but nobody has grouped them: the incident is opened at ${fmt(f.opened_at)}.</p>`}</div>
   <div class="card"><b>Learned in the last step</b>
-    ${d.learned ? ((d.learned.changes.length || d.learned.entries.length) ? '<ul>' + d.learned.changes.map((c) => `<li>${esc(c.what)}</li>`).join('') + d.learned.entries.map((e) => `<li>entry ${entryLink(e.id)}: ${esc(describe(e))}</li>`).join('') + '</ul>' : '<p class="muted">Entries already on record were attached to the incident.</p>') : '<p class="muted">Press "next step" in the bar above.</p>'}</div></div>
-  <p>See the rest of the Record at this moment: <a href="#/detector">the detector</a> · <a href="#/timeline/${encodeURIComponent(f.element)}">timeline of ${esc(f.element)}</a> · <a href="#/incidents">incidents on record</a></p>
-  <h2>How knowledge has arrived so far</h2>
-  <div class="key"><span><i class="c0"></i>a symptom on record, not yet linked to an incident</span>${[...new Set(d.entries.filter((e) => e.role).map((e) => (e.role === 'closing_note' ? 'cause' : e.role)))].map((x) => `<span><i class="${ROLE_CLASS[x]}"></i>${ROLE_LABEL[x] || x}</span>`).join('')}</div>
-  <div id="know"></div>
-  <h2>Has this been seen before?</h2>
-  <p class="muted small">Earlier incidents on record at this moment, shown as the Record knew them now. Symptom kinds of this problem so far: <span class="mono">${p.symptom_kinds.map(esc).join(', ') || 'none on record yet'}</span>.</p>
+    ${d.learned ? ((d.learned.changes.length || d.learned.entries.length) ? '<ul>' + d.learned.changes.map((c) => `<li>${esc(c.what)}</li>`).join('') + d.learned.entries.map((e) => `<li>entry ${entryLink(e.id)}: ${esc(describe(e))}</li>`).join('') + '</ul>' : '<p class="muted">Entries already on record were attached to the incident.</p>') : '<p class="muted">Press "next step".</p>'}</div></div>
+  ${replaySections(f.element)}
+  <details ${RS.seen ? 'open' : ''} data-rs="seen"><summary><b>Has this been seen before?</b> ${p.same_element.length} on the same element, ${p.same_symptom.length} with the same kind of symptom</summary>
+  <p class="muted small">Earlier incidents on record at this moment, as the Record knew them now. Symptom kinds of this problem so far: <span class="mono">${p.symptom_kinds.map(esc).join(', ') || 'none on record yet'}</span>.</p>
   <h3>On the same element (${p.same_element.length})</h3>${precTable(p.same_element)}
-  <h3>With the same kind of symptom, on any element (${p.same_symptom.length})</h3>${precTable(p.same_symptom)}
-  <h2>Entries on record for this problem (${d.entries.length})</h2>
+  <h3>With the same kind of symptom, on any element (${p.same_symptom.length})</h3>${precTable(p.same_symptom)}</details>
+  <details ${RS.entries ? 'open' : ''} data-rs="entries"><summary><b>Entries on record for this problem</b> (${d.entries.length})</summary>
   <p class="muted small">Before the incident is opened, only its symptoms are listed: they are what the crew is looking at. Evidence that an expert links later appears when that link is recorded, not before.</p>
-  <div class="tablewrap"><table><tr><th>Role</th>${ENTRY_HEAD}</tr>${entryRows(d.entries, (e) => `<td>${e.role ? esc(e.role) : '<span class="unknown">not yet linked</span>'}</td>`)}</table></div>
-  ${pl ? `<h2>Answer key</h2><div class="filters">${reveal}</div>${S.reveal ? `<div class="note keynote">${answerKey(caseFor)}</div>` : ''}` : ''}`;
+  <div class="tablewrap"><table><tr><th>Role</th>${ENTRY_HEAD}</tr>${entryRows(d.entries, (e) => `<td>${e.role ? esc(e.role) : '<span class="unknown">not yet linked</span>'}</td>`)}</table></div></details>
+  ${pl ? `<details ${S.reveal ? 'open' : ''} id="rvd"><summary><b>Answer key</b> <span class="muted small">the generator's own notes, never part of the Record</span></summary><div class="note keynote">${answerKey(caseFor)}</div></details>` : ''}`;
   return { html, mount() {
-    $('#know').innerHTML = knowledgeChart({ t_start: f.t_start }, d.entries, $('#know').clientWidth);
-    if ($('#rv')) $('#rv').addEventListener('change', (ev) => { S.reveal = ev.target.checked; render(); });
+    wireSteps();
+    $('#know').innerHTML = knowledgeChart({ t_start: f.t_start }, d.entries, $('#know').clientWidth, r.steps);
+    if ($('#rvd')) $('#rvd').addEventListener('toggle', (ev) => { S.reveal = ev.target.open; });
+    mountReplaySections(f.element);
   } };
 };
+/* Collapsible views inside the replay page. They are the same drawings as the full pages,
+   fed with the same as-of data. */
+const RS = { map: false, tl: false, seen: true, entries: false, view: null, viewFor: null };
+function replaySections(element) {
+  return `<details ${RS.map ? 'open' : ''} data-rs="map"><summary><b>The detector at this moment</b></summary><div id="rs-map"></div><p class="small"><a href="#/detector">Open the detector page</a></p></details>
+  <details ${RS.tl ? 'open' : ''} data-rs="tl"><summary><b>Timeline${element ? ' of ' + esc(element) : ''} up to this moment</b></summary><div id="rs-tl"></div>
+    <p class="small">Drag to zoom, double-click for the whole calendar. <a href="#/timeline${element ? '/' + encodeURIComponent(element) : ''}">Open the timeline page</a></p></details>`;
+}
+function mountReplaySections(element) {
+  const fill = async (key) => {
+    if (key === 'map') { const m = await api('map'); $('#rs-map').innerHTML = mapHeader(m) + mapSvg(m, $('#rs-map').clientWidth); }
+    if (key === 'tl') {
+      const name = element || (S.elements.find((e) => e.kind === 'detector') || S.elements[0]).name;
+      const t = await api('timeline', { element: name });
+      const from = S.replay.id ? S.replay.ask : S.asOf;
+      if (RS.viewFor !== S.replay.id + ':' + name) { RS.view = { t0: Math.max(t.t0, from - 8 * 3600), t1: Math.min(t.t1, Math.max(from, S.asOf) + 4 * 3600), typical: false }; RS.viewFor = S.replay.id + ':' + name; }
+      mountTimeline($('#rs-tl'), t, RS.view, name);
+    }
+  };
+  document.querySelectorAll('details[data-rs]').forEach((el) => {
+    const key = el.dataset.rs;
+    if (el.open) fill(key);
+    el.addEventListener('toggle', () => { RS[key] = el.open; if (el.open) fill(key); });
+  });
+}
 
 /* for developers --------------------------------------------------------------------- */
 const READS = {

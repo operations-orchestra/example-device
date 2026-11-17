@@ -125,3 +125,12 @@ nav .navfoot { margin-top: 26px; padding: 8px; border-top: 1px solid var(--grid)
 .flow .box.real { border-color: var(--accent); border-width: 2px; } .flow .box.demo { border-color: var(--demo); border-width: 2px; border-left-width: 5px; }
 .key i.c0 { background: var(--axis); } .c0 { stroke: var(--axis); fill: var(--axis); }
 details > summary { cursor: pointer; margin: 8px 0; } details ul { margin: 4px 0; max-width: 90ch; }
+
+/* replay on its own page */
+.clock { padding: 6px 16px; position: sticky; top: 0; z-index: 5; } .clock button { padding: 2px 9px; }
+.stepper { background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; padding: 8px 10px; } .stepper .spacer { flex: 1; }
+svg .step { fill: var(--surface); stroke: var(--ink2); stroke-width: 1.5; cursor: pointer; } svg .step.past { fill: var(--ink2); } svg .step.here { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+svg .future { fill: var(--grid); opacity: .45; }
+main details { border: 1px solid var(--grid); border-radius: 8px; padding: 2px 12px; margin: 10px 0; background: var(--surface); } main details[open] { padding-bottom: 10px; }
+.pathlabel { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 2px; }
+.key i.k-off { border: 1px dashed var(--ink2); height: 9px; background: none; } .key i.k-real { background: var(--accent); } .key i.k-demo { background: var(--demo); }
