@@ -45,7 +45,7 @@ def test_reads_are_refused_without_as_of(call, route):
 
 
 def test_only_named_endpoints_skip_as_of():
-    assert NO_AS_OF == {"meta", "next_known"} | DEMO_ONLY
+    assert NO_AS_OF == {"meta", "next_known", "provenance"} | DEMO_ONLY
 
 
 @pytest.mark.parametrize("route", ["overview", "entries", "incidents", "timeline", "precedents", "read", "map"])
@@ -179,3 +179,11 @@ def test_detector_map_shows_state_at_the_time_control(call, tiny):
     _, later = call("map", as_of=hot["ask_at"] + 600)
     assert {f["element"] for f in later["flags"]} and all(f["element"].startswith(hot["true_element"]) for f in later["flags"])
     assert [i["id"] for i in later["open_issues"]] == [hot["incident_id"]]
+
+
+def test_every_entry_type_says_who_writes_it(call, store, end):
+    _, body = call("provenance")
+    covered = {m for item in body["items"] if item["scope"] == "entry" for m in item["match"]}
+    in_record = {f"{src}/{typ}" for _, src, typ, _, _ in store.counts_by_type(end)}
+    assert in_record <= covered, sorted(in_record - covered)
+    assert all(item["by"] in body["by_label"] and item["production"] and item["demo"] for item in body["items"])

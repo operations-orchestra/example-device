@@ -267,7 +267,24 @@ Run `orchestra view` and open the address it prints.
 | Incident view on a linear time axis | a compressed axis relative to the incident start (each step is about ten times longer), so minutes and weeks fit together |
 | Precedents: "same symptom" | an earlier incident sharing a symptom kind, where the kind is the entry type plus its result, value or flag (for example `configure:failed`). Logbook notes are ignored because every incident has them. Wording is not compared. The code is `viewer/precedents.py`; it should move to the orchestrator once a rule is chosen. |
 
-Endpoints that may be called without `as_of`, and why: `meta` (which Record is loaded and
+**Where a local LLM would be at work.** A fourth kind of mark, added after the plan, with its
+own switch ("Highlight LLM content", on by default) and a page, **Who writes what**:
+
+| Mark | Meaning |
+|---|---|
+| LLM-written | text a local model composes in production (summaries of expert material) |
+| LLM draft, expert confirms | a model proposes, a person decides (indirect links, incident grouping, recovery and cause labels) |
+| LLM-anonymized | a person wrote it; a model only removes remaining names (logbook text, certification cause, downtime description) |
+
+The page lists every part of the Record with who writes it in production and how the demo
+produces it instead. In the demo no language model is used anywhere. The table is
+`viewer/provenance.py`; a test checks that every entry type in the Record is covered. Two
+rows are marked "assumed" because the proposal does not say who does the work: deciding
+which element a free-text note is about, and treating expert follow-ups and root causes as
+LLM summaries of slides and threads. Both need the project's confirmation.
+
+Endpoints that may be called without `as_of`, and why: `provenance` (explanatory text, reads
+nothing from the Record), `meta` (which Record is loaded and
 its time range), `next_known` (returns a time, never content), and the two demo-only
 endpoints that read `planted.json`. A test pins this list.
 

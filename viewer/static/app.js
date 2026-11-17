@@ -4,7 +4,7 @@
    methods with the time control's "as of" value. This file only draws; it never filters
    by time itself. Zooming a chart changes what is drawn, not what was fetched. */
 
-const S = { meta: null, asOf: 0, prev: null, pin: null, prod: false, planted: false, elements: [], plantedData: null };
+const S = { meta: null, asOf: 0, prev: null, pin: null, prod: false, planted: false, llm: true, prov: null, elements: [], plantedData: null };
 const $ = (s) => document.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fmt = (t) => (t == null ? '–' : new Date(t * 1000).toISOString().slice(0, 19).replace('T', ' '));
@@ -51,6 +51,26 @@ function describe(e) {
   return Object.entries(p).map(([k, v]) => `${k}=${Array.isArray(v) ? JSON.stringify(v) : v}`).join(', ');
 }
 const unknown = '<span class="unknown">not known at this time</span>';
+
+/* Who writes what in production (from the service's provenance table). */
+const LLM_BADGE = { llm_written: 'LLM-written', llm_expert: 'LLM draft, expert confirms', llm_anon: 'LLM-anonymized' };
+const LLM_CLASS = { llm_written: 'llm-w', llm_expert: 'llm-w', llm_anon: 'llm-a' };
+function provFor(scope, key) {
+  return S.prov.items.filter((i) => i.scope === scope && (i.match.includes(key) || i.match.includes('*')));
+}
+function llmBadge(item) {
+  if (!S.llm || !item || !LLM_BADGE[item.by]) return '';
+  const tip = `In production: ${item.production}\n\nIn this demo: ${item.demo}${item.assumed ? '\n\n(Assumed: the proposal does not say; needs confirming.)' : ''}`;
+  return `<span class="badge ${LLM_CLASS[item.by]}" data-tip="${esc(tip)}">${LLM_BADGE[item.by]}${item.assumed ? '?' : ''}</span> `;
+}
+const textProv = (e) => provFor('entry', `${e.source}/${e.type}`).find((i) => /text|cause|details/.test(i.field) && LLM_BADGE[i.by]);
+function whatCell(e) {
+  const item = S.llm ? textProv(e) : null;
+  const text = esc(describe(e));
+  return item ? `${llmBadge(item)}<span class="${LLM_CLASS[item.by]}">${text}</span>` : text;
+}
+const incProv = (key) => provFor('incident', key)[0];
+const linkProv = (type) => provFor('link', type)[0];
 const entryLink = (id) => `<a href="#/entry/${id}">${id}</a>`;
 const elLink = (name) => `<a href="#/timeline/${encodeURIComponent(name)}">${esc(name)}</a>`;
 const incLink = (id, title) => `<a href="#/incident/${id}">#${id}${title ? ' ' + esc(title) : ''}</a>`;
@@ -60,7 +80,7 @@ function entryRows(entries, extra) {
   return entries.map((e) => `<tr class="click" data-go="#/entry/${e.id}">
     ${extra ? extra(e) : ''}<td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td>
     <td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td>
-    <td class="what">${esc(describe(e))}</td></tr>`).join('');
+    <td class="what">${whatCell(e)}</td></tr>`).join('');
 }
 const ENTRY_HEAD = '<th>Happened</th><th>Known to the Record</th><th class="num">id</th><th>Class</th><th>Source / type</th><th>Element</th><th>What</th>';
 
@@ -273,7 +293,7 @@ const hideTip = () => { $('#tip').hidden = true; };
 /* ------------------------------------------------------------------------- pages */
 const PAGES = {};
 const NAV = [
-  ['Record', [['home', 'Home'], ['map', 'Detector map'], ['tables', 'Tables'], ['record', 'Entries'], ['incidents', 'Incidents'], ['timeline', 'Timeline'], ['precedents', 'Precedents'], ['api', 'Read API']]],
+  ['Record', [['home', 'Home'], ['map', 'Detector map'], ['tables', 'Tables'], ['record', 'Entries'], ['incidents', 'Incidents'], ['timeline', 'Timeline'], ['precedents', 'Precedents'], ['api', 'Read API'], ['who', 'Who writes what']]],
   ['Demo only', [['device', 'Device and faults'], ['planted', 'Planted answers']]],
 ];
 function drawNav(current) {
@@ -305,6 +325,7 @@ PAGES.home = async () => {
   <div class="card"><b>How to read this GUI</b>
     <p>Everything is shown as the Record stood at the time in the bar above. Move the time and entries, labels and links appear in the order the Record learned them.</p>
     <p>Three marks tell you what would exist with real records:</p>
+    <p><span class="badge llm-w">LLM-written</span> <span class="badge llm-a">LLM-anonymized</span> where a local language model would be at work on real records. In this demo no model is used; see <a href="#/who">Who writes what</a>.</p>
     <p>no mark: production-like, uses only what is in the Record.<br>${EXPERT} present in production only where experts reviewed an incident.<br>${DEMO} exists only because the data is synthetic. The "Production view" switch hides all of it.</p>
   </div></div>
   <h2>Calendar</h2><p class="muted small">Click anywhere on the strip to set the time control to that moment. The blue line is the time control.</p>
@@ -390,11 +411,14 @@ PAGES.entry = async (parts) => {
     <dt>Corrects</dt><dd>${e.supersedes ? entryLink(e.supersedes) : 'nothing'}</dd>
     <dt>Corrected by</dt><dd>${d.superseded_by ? entryLink(d.superseded_by) : 'nothing'}</dd>
   </dl></div><div class="card"><b>Payload</b><pre>${esc(JSON.stringify(e.payload, null, 2))}</pre></div></div>
+  <h2>Who writes this kind of entry</h2>
+  <div class="tablewrap"><table><tr><th>Part</th><th>In production, written by</th><th>How, in production</th><th>How, in this demo</th></tr>
+  ${provFor('entry', `${e.source}/${e.type}`).map((i) => `<tr><td>${esc(i.thing)}<br><span class="mono small muted">${esc(i.field)}</span></td><td>${llmBadge(i) || esc(S.prov.by_label[i.by])}${i.assumed ? '<br><span class="small muted">assumed</span>' : ''}</td><td class="what">${esc(i.production)}</td><td class="what">${esc(i.demo)}</td></tr>`).join('')}</table></div>
   <h2>Incidents this entry is attached to ${EXPERT}</h2>
   ${d.incidents.length ? '<ul>' + d.incidents.map((i) => `<li>${incLink(i.id, i.title)} as <b>${esc(i.role)}</b></li>`).join('') + '</ul>' : '<p class="muted">None known at this time.</p>'}
   <h2>Links</h2>
   ${d.links.length ? `<div class="tablewrap"><table><tr><th>Link</th><th>Other entry</th><th>What it is</th><th>Reason given</th><th>Known</th></tr>${d.links.map((l) =>
-    `<tr><td>${l.link_type} ${l.link_type === 'indirect' ? EXPERT : ''}<br>${l.direction === 'out' ? 'this ' + esc(l.relation) + ' &#8594;' : '&#8592; ' + esc(l.relation) + ' this'}</td>
+    `<tr><td>${l.link_type} ${l.link_type === 'indirect' ? EXPERT : ''} ${llmBadge(linkProv(l.link_type))}<br>${l.direction === 'out' ? 'this ' + esc(l.relation) + ' &#8594;' : '&#8592; ' + esc(l.relation) + ' this'}</td>
      <td>${entryLink(l.other.id)}</td><td class="what">${esc(describe(l.other))}</td><td class="what">${esc(l.rationale)}</td><td class="t">${fmt(l.known_at)}</td></tr>`).join('')}</table></div>` : '<p class="muted">None known at this time.</p>'}`;
   return { html };
 };
@@ -444,14 +468,14 @@ PAGES.incident = async (parts) => {
   const i = d.incident;
   const roles = [...new Set(d.entries.map((e) => (e.role === 'closing_note' ? 'cause' : e.role)))];
   const html = `<h1>Incident #${i.id}: ${esc(i.title)}</h1>
-  <p class="muted">As the Record knew it at ${fmt(S.asOf)}. Grouping and labels are ${EXPERT}.</p>
+  <p class="muted">As the Record knew it at ${fmt(S.asOf)}. Grouping and labels are ${EXPERT}. ${llmBadge(incProv('grouping'))}</p>
   <div class="card"><dl class="facts">
     <dt>Status</dt><dd>${statusCell(i.status)}</dd><dt>Element</dt><dd>${elLink(i.element)}</dd>
     <dt>Started</dt><dd>${fmt(i.t_start)} ${asofBtn(i.t_start + 300, 'go to 5 min after the start')}</dd>
     <dt>Ended</dt><dd>${i.t_end ? fmt(i.t_end) + ` <span class="muted">(${dur(i.t_end - i.t_start)})</span>` : unknown}</dd>
     <dt>Incident opened</dt><dd>${fmt(i.known_at)}</dd>
-    <dt>Recovery action</dt><dd>${i.recovery_action ? esc(i.recovery_action) : unknown}</dd>
-    <dt>Confirmed cause</dt><dd>${i.confirmed_cause ? esc(i.confirmed_cause) : unknown}</dd>
+    <dt>Recovery action</dt><dd>${i.recovery_action ? llmBadge(incProv('recovery_action')) + esc(i.recovery_action) : unknown}</dd>
+    <dt>Confirmed cause</dt><dd>${i.confirmed_cause ? llmBadge(incProv('confirmed_cause')) + esc(i.confirmed_cause) : unknown}</dd>
     <dt>Certification</dt><dd>${i.certification ? esc(i.certification) : unknown}</dd>
   </dl></div>
   <div class="filters"><button id="play-prev">&#9664; previous thing learned</button><button id="play-next">next thing learned &#9654;</button>
@@ -463,8 +487,8 @@ PAGES.incident = async (parts) => {
   <div id="know"></div>
   <h2>Entries attached (${d.entries.length} known at this time)</h2>
   <div class="tablewrap"><table><tr><th>Role</th>${ENTRY_HEAD}<th>Delay</th></tr>${d.entries.map((e) => `<tr class="click" data-go="#/entry/${e.id}"><td>${esc(e.role)}</td>
-    <td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${esc(describe(e))}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>
-  <h2>Expert reasoning ${EXPERT}</h2>
+    <td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${whatCell(e)}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>
+  <h2>Expert reasoning ${EXPERT} ${llmBadge(linkProv('indirect'))}</h2>
   ${d.links.filter((l) => l.link_type === 'indirect').length ? '<ul>' + d.links.filter((l) => l.link_type === 'indirect').map((l) => `<li>entry ${entryLink(l.src_entry_id)} ${esc(l.relation)} entry ${entryLink(l.dst_entry_id)}: ${esc(l.rationale)} <span class="muted small">(known ${fmt(l.known_at)})</span></li>`).join('') + '</ul>' : '<p class="muted">No expert links are known at this time.</p>'}`;
   return { html, mount() {
     $('#know').innerHTML = knowledgeChart(i, d.entries, $('#know').clientWidth);
@@ -646,7 +670,7 @@ PAGES.device = async () => {
     <dt>Honest answer then</dt><dd>${esc(c.expected.verdict)}; next step: ${esc(c.expected.next_step.replace('_', ' '))}${c.expected.precedents.length ? '; precedents ' + c.expected.precedents.map((x) => '#' + x).join(' ') : ''}</dd>
   </dl></div>
   <div class="tablewrap"><table><tr><th>Role</th>${ENTRY_HEAD}<th>Delay</th></tr>${c.entries.map((e) => `<tr class="click" data-go="#/entry/${e.id}"><td>${esc(e.role)}</td>
-    <td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${esc(describe(e))}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>
+    <td class="t">${fmt(e.t_start)}</td><td class="t">${fmt(e.known_at)}</td><td class="num">${e.id}</td><td>${e.record_class}</td><td>${esc(e.source)}/${esc(e.type)}</td><td>${esc(e.element)}</td><td class="what">${whatCell(e)}</td><td class="t">${dur(e.known_at - e.t_start)}</td></tr>`).join('')}</table></div>
   <p class="muted small">Opening an entry or incident from here uses the time control; if it says "not known", move the time forward.</p>
   <p>The <a href="#/map">detector map</a> is on its own page: it is read from the Record, so it is not demo only.</p>
   <h2>Calendar</h2>
@@ -831,6 +855,31 @@ PAGES.tables = async () => {
   } };
 };
 
+/* ------------------------------------------------------ who writes what */
+PAGES.who = async () => {
+  const o = await api('overview');
+  const count = (item) => item.scope !== 'entry' ? null : o.entries_by_type.filter(([, s2, t]) => item.match.includes(`${s2}/${t}`) || item.match.includes('*')).reduce((a, r) => a + r[4], 0);
+  const P = S.prov, groups = [['llm_written', 'Composed by a local LLM'], ['llm_expert', 'Proposed by a local LLM, confirmed by an expert'], ['llm_anon', 'Written by a person; a local LLM only removes names'], ['code', 'Computed by pipeline code, no language model'], ['source', 'Copied from an existing system']];
+  const touched = new Set();
+  o.entries_by_type.forEach(([, s2, t]) => { if (P.items.some((i) => i.scope === 'entry' && i.match.includes(`${s2}/${t}`) && LLM_BADGE[i.by])) touched.add(`${s2}/${t}`); });
+  const nLlm = o.entries_by_type.filter(([, s2, t]) => touched.has(`${s2}/${t}`)).reduce((a, r) => a + r[4], 0);
+  const html = `<h1>Who writes what</h1>
+  <p>In production, parts of the Record are written by locally hosted open-weight language models. This page lists every part of the Record, who writes it in production, and how the same part is produced in this demo.</p>
+  <div class="card"><b>In this demo, no language model is involved anywhere.</b>
+    <p>Every row was written by the synthetic generator: text from hand-written templates, numbers from formulas with random noise, and links, incidents and labels from the fault scripts at fixed delays. The marks below show where a local LLM <i>would</i> be at work on real records.</p>
+    <dl class="facts"><dt>Entries known at this time</dt><dd>${o.n_entries}</dd>
+    <dt>Of those, with LLM-touched content in production</dt><dd><b>${nLlm}</b> (${o.n_entries ? Math.round(100 * nLlm / o.n_entries) : 0}%)</dd>
+    <dt>Not touched by an LLM</dt><dd>${o.n_entries - nLlm}: readings, states and events from online systems</dd></dl></div>
+  <div class="key"><span><span class="badge llm-w">LLM-written</span> text a model composes</span><span><span class="badge llm-w">LLM draft, expert confirms</span> a model proposes, a person decides</span><span><span class="badge llm-a">LLM-anonymized</span> a person wrote it; a model only removes names</span><span>a "?" marks an assumption the proposal does not settle</span></div>
+  <p class="small muted">The "Highlight LLM content" switch at the top turns these marks on and off on every page.</p>
+  ${groups.map(([by, title]) => `<h2>${title}</h2>
+    <div class="tablewrap"><table><tr><th>Part of the Record</th><th>Stage</th><th>How, in production</th><th>How, in this demo</th><th class="num">Entries now</th></tr>
+    ${P.items.filter((i) => i.by === by).map((i) => `<tr><td><b>${esc(i.thing)}</b>${i.assumed ? ' <span class="badge expert" data-tip="The proposal does not say who does this. This is the prototype\'s reading and needs confirming.">assumed</span>' : ''}<br><span class="mono small muted">${esc(i.scope)}: ${esc(i.match.join(', '))}<br>${esc(i.field)}</span></td>
+      <td>${esc(i.stage)}</td><td class="what">${esc(i.production)}</td><td class="what">${esc(i.demo)}</td><td class="num">${count(i) ?? ''}</td></tr>`).join('')}</table></div>`).join('')}
+  <h2>LLM-written content the demo does not have at all</h2><ul>${P.not_in_demo.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
+  return { html };
+};
+
 /* ----------------------------------------------------------------- shell */
 let token = 0;
 async function render() {
@@ -880,7 +929,10 @@ window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer
   $('#banner').title = S.meta.banner;
   const m = location.hash.match(/[?&]t=(\d+)/);
   S.asOf = m ? +m[1] : S.meta.latest_known_at;
-  S.prod = store('prod') === '1'; S.planted = store('planted') === '1';
+  S.prod = store('prod') === '1'; S.planted = store('planted') === '1'; S.llm = store('llm') !== '0';
+  S.prov = await api('provenance', {}, false);
+  $('#sw-llm').checked = S.llm;
+  $('#sw-llm').addEventListener('change', (ev) => { S.llm = ev.target.checked; store('llm', S.llm ? '1' : '0'); render(); });
   $('#sw-prod').checked = S.prod; $('#sw-planted').checked = S.planted;
   $('#sw-prod').addEventListener('change', (ev) => { S.prod = ev.target.checked; store('prod', S.prod ? '1' : '0'); render(); });
   $('#sw-planted').addEventListener('change', (ev) => { S.planted = ev.target.checked; store('planted', S.planted ? '1' : '0'); render(); });

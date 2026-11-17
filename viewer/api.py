@@ -4,6 +4,7 @@ Rule: every endpoint that reads Record content requires ``as_of`` and returns no
 known later. The exceptions are named explicitly:
   * ``meta``       - which Record is loaded and its time range (needed to set the clock)
   * ``next_known`` - returns a time only, never content
+  * ``provenance`` - explanatory text about who writes what; reads nothing from the Record
   * ``demo/*``     - demo-only endpoints that read planted.json, the generator's own list
 
 The browser does no filtering of its own.
@@ -19,6 +20,7 @@ from aggregator import TABLES, RecordStore, StoredEntry
 from aggregator.view import scope
 
 from . import precedents as prec
+from . import provenance as prov
 
 
 class ApiError(Exception):
@@ -321,6 +323,11 @@ def _plain(x: Any) -> Any:
     return str(x)
 
 
+def provenance(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """Who writes what, in production and in the demo. Explanatory text; reads nothing from the Record."""
+    return prov.lookup()
+
+
 # ------------------------------------------------------------------ demo-only endpoints
 def _planted(ctx: dict) -> dict:
     if ctx["planted"] is None:
@@ -364,8 +371,8 @@ ROUTES: dict[str, Callable[[RecordStore, dict, dict], dict]] = {
     "meta": meta, "next_known": next_known, "overview": overview, "elements": elements,
     "entries": entries, "entry": entry, "incidents": incidents, "incident": incident,
     "timeline": timeline, "tables": tables, "map": detector_map, "diff": diff, "precedents": precedents, "read": read,
-    "demo/planted": demo_planted, "demo/device": demo_device,
+    "provenance": provenance, "demo/planted": demo_planted, "demo/device": demo_device,
 }
 # Endpoints that may be called without as_of, and why (see the module docstring).
-NO_AS_OF = {"meta", "next_known", "demo/planted", "demo/device"}
+NO_AS_OF = {"meta", "next_known", "provenance", "demo/planted", "demo/device"}
 DEMO_ONLY = {"demo/planted", "demo/device"}

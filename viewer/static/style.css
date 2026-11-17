@@ -3,14 +3,14 @@
   --grid: #e1e0d9; --axis: #c3c2b7; --fill: #c3c2b7;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6;
   --critical: #d03b3b; --serious: #ec835a; --good: #0ca30c;
-  --demo: #6250d6; --demo-bg: #efedfb; --accent: #256abf;
+  --demo: #6250d6; --demo-bg: #efedfb; --accent: #256abf; --llm: #0f7f58; --llm-bg: #e3f5ee;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --surface: #1a1a19; --page: #0d0d0d; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
     --grid: #2c2c2a; --axis: #383835; --fill: #52514e;
     --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9;
-    --demo: #9085e9; --demo-bg: #24223a; --accent: #6da7ec;
+    --demo: #9085e9; --demo-bg: #24223a; --accent: #6da7ec; --llm: #4cc79b; --llm-bg: #17302a;
   }
 }
 * { box-sizing: border-box; }
@@ -107,3 +107,7 @@ svg .chan { fill: var(--fill); } svg .chan.hot { fill: var(--critical); }
 svg .issue { fill: var(--critical); font-weight: 600; }
 table.raw td, table.raw th { font-size: 12px; white-space: nowrap; font-family: ui-monospace, Menlo, monospace; }
 table.raw .hl { background: var(--grid); }
+/* where a local LLM would be at work in production */
+.badge.llm-w { background: var(--llm); color: #fff; } .badge.llm-a { border: 1px dashed var(--llm); color: var(--llm); }
+span.llm-w { background: var(--llm-bg); box-shadow: inset 0 -2px 0 var(--llm); } span.llm-a { border-bottom: 2px dotted var(--llm); }
+@media (prefers-color-scheme: dark) { .badge.llm-w { color: #0d0d0d; } }

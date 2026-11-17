@@ -168,7 +168,7 @@ orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
 orchestra view  [--db FILE] [--port N]
 ```
 
-### 4.5 Tests (67 pass, 1 skipped until `orchestrator/` exists)
+### 4.5 Tests (68 pass, 1 skipped until `orchestrator/` exists)
 
 | File | Checks |
 |---|---|
@@ -303,7 +303,7 @@ been pushed. Once it is:
 git clone git@github.com:operations-orchestra/example-device.git
 cd example-device && git checkout prototype/synthetic-record
 pixi install                      # or: pip install -e '.[plot,dev]' on Python 3.10+
-pixi run pytest -q                # 67 pass, 1 skipped
+pixi run pytest -q                # 68 pass, 1 skipped
 pixi run orchestra synth          # out/record.db, out/planted.json
 pixi run orchestra info
 pixi run orchestra show 3 --as-of 2040-03-02T12:06
