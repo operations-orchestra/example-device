@@ -153,3 +153,18 @@ def test_demo_command_runs(tiny, capsys):
     assert main(["demo", "--db", tiny["db"]]) == 0
     out = capsys.readouterr().out
     assert out.count("check        passed") == 3 and "verdict      new" in out and "verdict      known" in out
+
+
+def test_agent_report_judges_by_later_reviews_only(call, tiny, store):
+    end = store.latest_known_at()
+    _, body = call("agent_report", as_of=end)
+    rows = {r["id"]: r for r in body["rows"]}
+    first, second = [c for c in tiny["planted_cases"] if c["mode"] == "configure_failure"][:2]
+    assert rows[first["incident_id"]]["verdict"] == "new" and rows[first["incident_id"]]["outcome"] == "right"
+    assert rows[second["incident_id"]]["outcome"] == "right" and rows[second["incident_id"]]["precedent"] == first["incident_id"]
+    assert all(r["accepted"] for r in rows.values())
+    # earlier, the reviews are not written yet: nothing can be judged
+    _, early = call("agent_report", as_of=second["ask_at"] + 3600)
+    assert {r["outcome"] for r in early["rows"]} <= {"not reviewed yet", "right"}
+    assert all(r["asked"] <= second["ask_at"] + 3600 for r in early["rows"])
+    assert body["learning"][0]["symptom"] == pytest.approx(1 / 3, abs=1e-3)

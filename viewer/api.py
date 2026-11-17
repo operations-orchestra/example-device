@@ -600,6 +600,64 @@ def agent(store: RecordStore, q: dict, ctx: dict) -> dict:
             "accepted": r["accepted"], "settings": r["settings"].describe(), "learned": r["learned"], "cited": cited}
 
 
+_REPORT_CACHE: dict[tuple, dict] = {}
+
+
+def agent_report(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """The scripted agent run on every incident, each at the moment its crew first asked, and
+    judged against what the Record learned afterwards (later precedent reviews), as of ``as_of``.
+
+    The judgement uses only the Record. The answer key is added separately, for the demo.
+    """
+    from orchestrator.confidence import Settings, learned_counts
+
+    as_of = _as_of(q)
+    key = (str(store.path), store.path.stat().st_mtime, as_of)
+    if key in _REPORT_CACHE:
+        return _REPORT_CACHE[key]
+    rows = []
+    reviews = store.precedent_reviews(as_of)
+    for inc in store.incidents(as_of):
+        asked = prec.first_ask_time(store, inc.id)
+        if asked is None or asked > as_of:
+            continue
+        trig = trigger_for(store, inc.id, asked)
+        if trig is None:
+            continue
+        r = diagnose(trig, ScriptedBrain(), store, ctx.get("archive"))
+        p = r["proposal"]
+        mine = [x for x in reviews if x["incident_id"] == inc.id]
+        confirmed = {x["earlier_id"] for x in mine if x["status"] == "confirmed"}
+        rejected = {x["earlier_id"] for x in mine if x["status"] == "rejected"}
+        # judged by the reviews written after the incident was closed
+        if p.verdict == "new":
+            outcome = "missed" if confirmed else "right" if mine or inc.status in ("closed", "unresolved") else "not reviewed yet"
+        elif p.precedent in confirmed:
+            outcome = "right" if p.verdict == "known" else "too cautious"
+        elif p.precedent in rejected:
+            outcome = "wrong" if p.verdict == "known" else "right to doubt"
+        else:
+            outcome = "not reviewed yet"
+        rows.append({"id": inc.id, "title": inc.title, "element": inc.element, "t_start": inc.t_start, "asked": asked,
+                     "verdict": p.verdict, "confidence": p.confidence, "precedent": p.precedent, "next_step": p.next_step,
+                     "part": p.element, "accepted": r["accepted"], "n_calls": len(r["log"].calls),
+                     "signature": p.candidates[0]["signature"] if p.candidates else None,
+                     "n_candidates": len(p.candidates), "outcome": outcome,
+                     "confirmed_later": sorted(confirmed), "rejected_later": sorted(rejected)})
+    # how the learned starting value of each signature moved as reviews came in
+    s = Settings()
+    times = sorted({x["known_at"] for x in reviews})
+    learning = []
+    for t in [store.time_span()[0]] + times:
+        counts = learned_counts(store, t)
+        learning.append({"t": t, **{sig: round((a + counts[sig]["confirmed"]) / (a + b + counts[sig]["confirmed"] + counts[sig]["rejected"]), 3)
+                                    for sig, (a, b) in s.priors.items()},
+                         "counts": counts})
+    out = {"rows": rows, "settings": s.describe(), "learning": learning, "t1": store.time_span()[1]}
+    _REPORT_CACHE[key] = out
+    return out
+
+
 def built(store: RecordStore, q: dict, ctx: dict) -> dict:
     """Real rows used as worked examples on the 'how the Record is built' page."""
     as_of = _as_of(q)
@@ -677,7 +735,7 @@ ROUTES: dict[str, Callable[[RecordStore, dict, dict], dict]] = {
     "meta": meta, "next_known": next_known, "overview": overview, "elements": elements,
     "entries": entries, "entry": entry, "incidents": incidents, "incident": incident,
     "timeline": timeline, "tables": tables, "map": detector_map, "diff": diff, "precedents": precedents, "read": read,
-    "replay": replay, "built": built, "interfaces": interfaces, "agent": agent, "demo/planted": demo_planted, "demo/device": demo_device,
+    "replay": replay, "built": built, "interfaces": interfaces, "agent": agent, "agent_report": agent_report, "demo/planted": demo_planted, "demo/device": demo_device,
 }
 # Endpoints that may be called without as_of, and why (see the module docstring).
 NO_AS_OF = {"meta", "next_known", "demo/planted", "demo/device"}

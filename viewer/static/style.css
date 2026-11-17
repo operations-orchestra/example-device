@@ -187,3 +187,7 @@ svg .leader { stroke: var(--axis); stroke-width: 1; }
 .cbar > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--ink2); border-radius: 4px; }
 .cbar > i { position: absolute; top: -3px; bottom: -3px; width: 1px; background: var(--muted); }
 .bad-text { color: var(--critical); } ol.calls li { margin: 4px 0; }
+.v-wrong { background: var(--critical); } .v-pending { background: var(--muted); }
+.tiles { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0 12px; } .tile { background: var(--surface); border: 1px solid var(--grid); border-radius: 8px; padding: 8px 14px; min-width: 130px; }
+.tile b { display: block; font-size: 22px; } .tile span { color: var(--ink2); font-size: 12px; }
+table.matrix { width: auto; } table.matrix td, table.matrix th { text-align: center; } table.matrix td:first-child { text-align: left; }

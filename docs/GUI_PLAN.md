@@ -411,3 +411,11 @@ clicking through a replay (step, Play, jumps, Exit), drag-to-zoom, and the answe
   earlier incident recalled with how its confidence was reached, the evidence it cites (each
   with the logged call that returned it), and every tool call. The answer key, when revealed,
   shows the honest answer beside it.
+- **Page 6, The agent.** What the agent does (trigger, tools, recall, confidence, proposal,
+  check; the scripted brain and the confidence settings), with a demo-explainer note on the two
+  shortcuts (the trigger's symptoms come from the generator's incident; the reviews are
+  invented). Then how it did: every incident asked at its crew's first moment, judged by the
+  precedent reviews written after closure (right, too cautious, right to doubt, wrong, missed,
+  not reviewed yet), a verdict-by-outcome table, how the learned starting values moved over the
+  calendar, and every incident with a button to replay it at that moment. The answer key is a
+  separate column behind a toggle.

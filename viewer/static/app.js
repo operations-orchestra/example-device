@@ -483,6 +483,7 @@ const NAV = [
   ['3', 'tables', 'What is in the Record', [['tables', 'Tables'], ['record', 'Entries'], ['incidents', 'Incidents'], ['timeline', 'Timeline']]],
   ['4', 'scenarios', 'Scenarios in this demo', null, true],
   ['5', 'replay', 'Replay'],
+  ['6', 'agent', 'The agent'],
 ];
 const ALIAS = { entry: 'record', incident: 'incidents' };
 function drawNav(current) {
@@ -1078,6 +1079,74 @@ function mountReplaySections(element) {
     el.addEventListener('toggle', () => { RS[key] = el.open; if (el.open) fill(key); });
   });
 }
+
+/* 6. the agent ------------------------------------------------------------------------ */
+const OUTCOME = {
+  right: ['right', 'v-known', 'a precedent it called known was confirmed later, or it called a problem new and none was'],
+  'too cautious': ['too cautious', 'v-uncertain', 'it named the right precedent but was not sure enough to call it known'],
+  'right to doubt': ['right to doubt', 'v-uncertain', 'it was unsure, and the precedent was later rejected'],
+  wrong: ['wrong', 'v-wrong', 'it called a problem known, and the precedent was later rejected'],
+  missed: ['missed', 'v-wrong', 'it called a problem new, but a precedent was later confirmed'],
+  'not reviewed yet': ['not reviewed yet', 'v-pending', 'no review of this incident is on record yet'],
+};
+PAGES.agent = async () => {
+  const d = await api('agent_report');
+  const pl = S.reveal ? await planted() : null;
+  const key = pl ? Object.fromEntries(pl.cases.filter((c) => c.incident_id).map((c) => [c.incident_id, c])) : {};
+  const rows = d.rows, pct = (x) => `${Math.round(x * 100)}%`, set = d.settings;
+  const count = (f) => rows.filter(f).length;
+  const bins = [['new (below ' + pct(set.new_below) + ')', (r) => r.verdict === 'new'], ['uncertain', (r) => r.verdict === 'uncertain'], ['known (from ' + pct(set.known_at_least) + ')', (r) => r.verdict === 'known']];
+  const outcomes = Object.keys(OUTCOME).filter((o) => rows.some((r) => r.outcome === o));
+  const badge = (o) => `<span class="verdict ${OUTCOME[o][1]}" title="${esc(OUTCOME[o][2])}">${OUTCOME[o][0]}</span>`;
+  const html = `<h1>The agent</h1>
+  <p class="lead">What the diagnosis agent does, and how it did on every incident in this Record, each asked at the moment its crew would first have asked.</p>
+  <h2>What it does</h2>
+  <div class="flow">
+    <div class="box"><b>1. Trigger</b>a question, the moment, where the problem shows, and the symptom entries on record</div><span class="arrow">&#8594;</span>
+    <div class="box real"><b>2. Tools</b>six read-only calls, all as of the moment, all logged: search_incidents, get_incident, state, events, co_occurring, series</div><span class="arrow">&#8594;</span>
+    <div class="box real"><b>3. Recall</b>earlier incidents sharing a part or a kind of symptom</div><span class="arrow">&#8594;</span>
+    <div class="box real"><b>4. Confidence</b>per recalled incident: learned from past reviews, raised by evidence found again</div><span class="arrow">&#8594;</span>
+    <div class="box real"><b>5. Proposal</b>verdict, next step, part, diagnosis, cited evidence; checked before anyone sees it</div></div>
+  <div class="cols"><div class="card"><b>The scripted brain</b>, used here: a fixed procedure, no language model. Look at the symptoms; recall; open each candidate; check whether the parts its experts suspected or blamed are in the same abnormal state now; look at the 12 hours before; fetch a supply's voltage from the source if one is involved; score; fill in the proposal. A <b>model brain</b> can take its place through any OpenAI-compatible endpoint, with the same tools and the same check; it has not been run against a real model yet.</div>
+  <div class="card"><b>The confidence</b>, per recalled incident:<ul class="rules">
+    <li>starting value for its kind of match, learned from precedent reviews known at the moment, with an expert prior: ${Object.entries(set.priors).map(([k, v]) => `${k === 'both' ? 'shared part and symptom' : k === 'symptom' ? 'same symptom' : 'shared part'} as if ${v.confirmed} confirmed / ${v.rejected} rejected`).join('; ')}</li>
+    <li>odds x${set.evidence_factor} for each thing its experts relied on that is found again now</li>
+    <li>known from ${pct(set.known_at_least)}; uncertain from ${pct(set.new_below)}; new below</li></ul>
+    <p class="small muted">The <b>check</b> rejects any cited entry that no logged tool call returned, and "known" without a precedent.</p></div></div>
+  ${EXPLAINER('In this demo the trigger takes the symptom entries from the incident the generator later writes, standing in for the crew pointing at what they see; and the precedent reviews the confidence learns from were invented by the generator, knowing the truth.')}
+  <h2>How it did</h2>
+  <p class="muted small">Each incident is asked at the moment its crew would first have asked (five minutes after its first symptom), with only what the Record knew then. It is judged by the precedent reviews written after the incident was closed: the Record's own later verdict, not the answer key.</p>
+  <div class="tiles">${[['incidents asked', rows.length], ...bins.map(([l, f]) => [l, count(f)])].map(([l, n]) => `<div class="tile"><b>${n}</b><span>${l}</span></div>`).join('')}</div>
+  <div class="tablewrap"><table class="matrix"><tr><th>Verdict \\ judged later</th>${outcomes.map((o) => `<th>${badge(o)}</th>`).join('')}</tr>
+    ${bins.map(([l, f]) => `<tr><td><b>${l}</b></td>${outcomes.map((o) => { const n = count((r) => f(r) && r.outcome === o); return `<td class="num">${n || ''}</td>`; }).join('')}</tr>`).join('')}</table></div>
+  <p class="small muted">${outcomes.map((o) => `${badge(o)} ${esc(OUTCOME[o][2])}`).join('<br>')}</p>
+  <h2>How the learned starting values moved</h2>
+  <p class="muted small">Each line is the starting confidence for one kind of match, as precedent reviews accumulate. A recurrence of the same symptom on a different part starts at ${pct(set.priors.symptom.confirmed / (set.priors.symptom.confirmed + set.priors.symptom.rejected))} and rises as reviews confirm that such matches are real precedents.</p>
+  <div class="key"><span><i class="c1"></i>shared part and symptom</span><span><i class="c2"></i>same symptom</span><span><i class="c3"></i>shared part only</span></div>
+  <div id="learn"></div>
+  <h2>Every incident</h2>
+  <div class="filters"><label><input type="checkbox" id="rv"${S.reveal ? ' checked' : ''}> Reveal the answer key</label> <span class="muted small">the generator's own notes, never part of the Record</span></div>
+  <div class="tablewrap"><table><tr><th>#</th><th>Title</th><th>Asked</th><th>Verdict</th><th>Confidence</th><th>Precedent</th><th>Next step</th><th>Judged later</th>${pl ? '<th class="key-col">Answer key</th>' : ''}<th></th></tr>
+  ${rows.map((r) => `<tr><td class="num">${r.id}</td><td>${incLink(r.id, r.title)}</td><td class="t">${tm(r.asked)}</td>
+    <td><span class="verdict ${VERDICT_CLS[r.verdict]}">${r.verdict}</span></td>
+    <td class="t"><span class="cbar"><span style="width:${pct(r.confidence)}"></span><i style="left:${pct(set.new_below)}"></i><i style="left:${pct(set.known_at_least)}"></i></span> ${pct(r.confidence)}</td>
+    <td>${r.precedent ? incLink(r.precedent) : '<span class="muted">none</span>'}</td><td>${r.next_step.replace('_', ' ')}</td><td>${badge(r.outcome)}</td>
+    ${pl ? `<td class="key-col small">${key[r.id] ? `${esc(key[r.id].expected.verdict)}${key[r.id].expected.verdict === r.verdict ? ' ✓' : ''}` : ''}</td>` : ''}
+    <td><button data-replay-at="${r.id}:${r.asked}">Replay</button></td></tr>`).join('')}</table></div>`;
+  return { html, mount() {
+    if ($('#rv')) $('#rv').addEventListener('change', (ev) => { S.reveal = ev.target.checked; render(); });
+    document.querySelectorAll('[data-replay-at]').forEach((b) => b.addEventListener('click', async () => {
+      const [id, t] = b.dataset.replayAt.split(':').map(Number);
+      await startReplay(id); setAsOf(t);
+    }));
+    const host = $('#learn'), L = d.learning;
+    const series = ['both', 'symptom', 'part'].map((sig, k) => ({ box: sig, cls: `c${k + 1}`, points: L.map((x, i) => ({ t0: x.t, t1: i + 1 < L.length ? L[i + 1].t : d.t1, v: x[sig] })) }));
+    const cfg = { t0: L[0].t, t1: Math.max(d.t1, L[L.length - 1].t), width: host.clientWidth, panels: [{ label: 'Starting confidence', unit: 'fraction', per_run: true, series }],
+      rows: [], vlines: [{ t: L[0].t, cls: 'grid' }], aria: 'learned starting confidence per kind of match over time' };
+    const chart = buildChart(cfg);
+    host.innerHTML = chart.svg;
+  } };
+};
 
 /* for developers --------------------------------------------------------------------- */
 const READS = {
