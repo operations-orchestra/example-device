@@ -176,7 +176,7 @@ def test_profiles_keep_keys_out_of_the_file_and_out_of_sight(tmp_path, monkeypat
     from orchestrator.llm_config import ConfigError, config_path, get_profile, load_profiles
 
     monkeypatch.delenv("ORCHESTRA_LLM_CONFIG", raising=False)
-    assert str(config_path()).endswith(".config/orchestra/llm.yaml")    # real profiles stay out of the repository
+    assert config_path().parent.name == "config"                       # profiles next to the code; keys elsewhere
     cfg = tmp_path / "llm.yaml"
     cfg.write_text("""
 default: gw
@@ -211,12 +211,16 @@ profiles:
         load_profiles()
 
 
-def test_the_repository_holds_only_an_example_without_keys(monkeypatch):
+def test_git_holds_only_an_example_without_keys(monkeypatch):
     import yaml
 
     from orchestrator.llm_config import REPO, load_profiles
 
-    assert not (REPO / "config" / "llm.yaml").exists()
+    import subprocess
+
+    ignored = subprocess.run(["git", "check-ignore", "-q", "config/llm.yaml"], cwd=REPO)
+    tracked = subprocess.run(["git", "ls-files", "--error-unmatch", "config/llm.yaml"], cwd=REPO, capture_output=True)
+    assert ignored.returncode == 0 and tracked.returncode != 0         # the real profiles never enter git
     example = REPO / "config" / "llm.example.yaml"
     data = yaml.safe_load(example.read_text())
     assert all("api_key" not in (s.get("options") or {}) for s in data["profiles"].values())

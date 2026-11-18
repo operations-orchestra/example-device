@@ -104,9 +104,9 @@ for tests and is never part of the Record.
 ## The LLM brain
 
 The agent's scripted brain needs nothing. To compare it with a language model, list your
-endpoints in `~/.config/orchestra/llm.yaml`, outside this repository
-(`$ORCHESTRA_LLM_CONFIG` overrides). Start from `config/llm.example.yaml`. Profiles name
-endpoints and models, never keys: each says which variable holds its key (`api_key_env`).
+endpoints in `config/llm.yaml`, which git ignores (`$ORCHESTRA_LLM_CONFIG` overrides). Start
+from `config/llm.example.yaml`. Profiles name endpoints and models, never keys: each says
+which variable holds its key (`api_key_env`). Only the keys live outside the repository.
 
 Each key is looked up first in the environment, then in `~/.config/orchestra/keys.env`, one
 `NAME=value` per line, which must be readable only by you:

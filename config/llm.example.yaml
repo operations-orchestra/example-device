@@ -1,7 +1,7 @@
 # An example of the LLM profiles file for the agent's LLM brain (orchestrator/llm_config.py).
-# Copy it to ~/.config/orchestra/llm.yaml and put your own endpoints there; the real list is
-# kept out of this repository. No keys in either file: each profile names the variable that
-# holds its key, set in the environment or in ~/.config/orchestra/keys.env (chmod 600).
+# Copy it to config/llm.yaml (ignored by git) and put your own endpoints there. No keys in
+# either file: each profile names the variable that holds its key, set in the environment or
+# in ~/.config/orchestra/keys.env (chmod 600).
 default: local
 profiles:
   local:                       # a model served on this machine (for example by Ollama): no key

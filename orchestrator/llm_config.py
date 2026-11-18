@@ -1,7 +1,7 @@
 """Where the LLM brain's endpoints come from: named profiles, and keys kept apart from them.
 
-Profiles: ``$ORCHESTRA_LLM_CONFIG`` if set, else ``~/.config/orchestra/llm.yaml``. The
-repository holds only ``config/llm.example.yaml``; real endpoints stay out of it::
+Profiles: ``$ORCHESTRA_LLM_CONFIG`` if set, else ``config/llm.yaml`` in the repository, which
+git ignores. The repository tracks only ``config/llm.example.yaml``; copy it to start::
 
     default: gateway
     profiles:
@@ -94,7 +94,7 @@ class Profile:
 
 
 def config_path() -> Path:
-    return Path(os.environ.get("ORCHESTRA_LLM_CONFIG", "~/.config/orchestra/llm.yaml")).expanduser()
+    return Path(os.environ.get("ORCHESTRA_LLM_CONFIG", str(REPO / "config" / "llm.yaml"))).expanduser()
 
 
 def keys_path() -> Path:
@@ -148,7 +148,7 @@ def load_profiles(path: Optional[Path] = None) -> tuple[dict[str, Profile], Opti
 def get_profile(name: Optional[str] = None, path: Optional[Path] = None) -> Profile:
     profiles, default = load_profiles(path)
     if not profiles:
-        raise ConfigError(f"no LLM profiles in {config_path()}: copy config/llm.example.yaml there and edit it")
+        raise ConfigError(f"no LLM profiles in {config_path()}: copy config/llm.example.yaml to it and edit it")
     chosen = name or default or (next(iter(profiles)) if len(profiles) == 1 else None)
     if chosen is None:
         raise ConfigError(f"several profiles and no default: name one of {sorted(profiles)}")
