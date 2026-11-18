@@ -1,0 +1,22 @@
+# Claudoperation capture policy for this repository: what product a session contributes to,
+# and which kind of record it gets (claudoperation SPEC, section 8).
+#
+#   functional  working code: records keep design-level decisions only; approval by exception
+#   endorsed    documents others rely on: every claim reviewed; approval claim by claim
+#
+# Rules are tried in order; the first whose paths match a file the session changed decides.
+# A session that changes both kinds gets the type of the files it changed most; the record
+# says so in its Open questions. Files under "exempt" never decide anything.
+default:
+  product: example-device (branch prototype/synthetic-record)
+  product_type: functional
+rules:
+  - paths: ["docs/**", "README.md", "*/README.md"]
+    product: example-device design documents
+    product_type: endorsed
+exempt:
+  - "sessions/**"
+  - "out/**"
+  - "config/llm.yaml"
+  - "pixi.lock"
+  - "*.db"

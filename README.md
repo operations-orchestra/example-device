@@ -12,11 +12,11 @@ that answers "has this been seen before, and what should we do?" with cited evid
 
 ## Try it
 
-- **No installation:** open the single-file demo in a browser,
-  `out/small/demo/orchestra-demo.html` (rebuild it with
-  `pixi run orchestra export-static --db out/small/record.db`). It is a snapshot of one
-  30-day Record: every page, and Replay with the agent's answer at every step of every
-  incident.
+- **No installation:** open the single-file demo, `orchestra-demo.html`, in a browser. It is
+  sent separately, because generated files are not committed; build it yourself with
+  `pixi run orchestra synth --preset small --out out/small` and
+  `pixi run orchestra export-static --db out/small/record.db`. It is a snapshot of one 30-day
+  Record: every page, and Replay with the agent's answer at every step of every incident.
 - **Live:** `pixi install`, then `pixi run orchestra synth --preset small --out out/small`
   and `pixi run orchestra view --db out/small/record.db`, then open http://127.0.0.1:8765/.
 - **Terminal:** `pixi run orchestra demo` prints the proposal's Fig. 2 story: one problem,
