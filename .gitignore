@@ -12,3 +12,4 @@ planted.json
 
 # Real LLM endpoints: kept out of git (start from config/llm.example.yaml). Keys live in ~/.config/orchestra/keys.env.
 config/llm.yaml
+*.swp
