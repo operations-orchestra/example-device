@@ -8,6 +8,7 @@ python = "3.11.*"
 pytest = "*"
 matplotlib-base = "*"
 pip = "*"
+pyyaml = "*"
 
 [pypi-dependencies]
 operations-orchestra-example = { path = ".", editable = true }

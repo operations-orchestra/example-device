@@ -62,6 +62,7 @@ class Proposal:
     candidates: list[dict] = field(default_factory=list)   # every candidate with how its confidence was reached
     notes: list[str] = field(default_factory=list)
     brain: str = ""
+    brain_label: str = ""              # e.g. the profile and model of an LLM brain
 
 
 class Brain(Protocol):
@@ -175,15 +176,25 @@ class ModelBrain:
 
     name = "model"
 
-    def __init__(self, base_url: str, model: str, api_key: str = "", max_turns: int = 12, timeout: int = 60):
-        self.base_url, self.model, self.api_key = base_url.rstrip("/"), model, api_key
+    def __init__(self, base_url: str, model: str, api_key: str = "", max_turns: int = 12, timeout: float = 300,
+                 label: str = ""):
+        self.base_url, self.model, self._key = base_url.rstrip("/"), model, api_key
         self.max_turns, self.timeout = max_turns, timeout
+        self.label = label or model
+
+    @classmethod
+    def from_profile(cls, profile) -> "ModelBrain":
+        """A brain for a named profile (orchestrator/llm_config.py); the key is read now."""
+        return cls(profile.base_url, profile.model, profile.api_key(), label=f"{profile.name}: {profile.model}")
+
+    def __repr__(self) -> str:                 # never show the key
+        return f"ModelBrain({self.label!r} at {self.base_url})"
 
     def _chat(self, messages: list[dict]) -> dict:
         body = json.dumps({"model": self.model, "messages": messages, "tools": TOOL_SPECS}).encode()
         req = urllib.request.Request(f"{self.base_url}/chat/completions", data=body, method="POST",
                                      headers={"Content-Type": "application/json",
-                                              **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {})})
+                                              **({"Authorization": f"Bearer {self._key}"} if self._key else {})})
         with urllib.request.urlopen(req, timeout=self.timeout) as resp:
             return json.load(resp)["choices"][0]["message"]
 
@@ -203,7 +214,9 @@ class ModelBrain:
             messages.append(msg)
             calls = msg.get("tool_calls") or []
             if not calls:
-                return self._parse(msg.get("content") or "")
+                proposal = self._parse(msg.get("content") or "")
+                proposal.brain_label = self.label
+                return proposal
             for call in calls:
                 fn = call["function"]
                 try:
@@ -216,11 +229,15 @@ class ModelBrain:
                     out = {"error": str(exc)}
                 messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": json.dumps(out, default=str)})
         return Proposal(element=trigger.part, verdict="new", diagnosis="The model did not answer within its turn limit.",
-                        next_step="escalate", relied_on="none", brain=self.name)
+                        next_step="escalate", relied_on="none", brain=self.name, brain_label=self.label)
 
     def _parse(self, text: str) -> Proposal:
         start, end = text.find("{"), text.rfind("}")
-        d = json.loads(text[start:end + 1])
+        try:
+            d = json.loads(text[start:end + 1])
+        except ValueError:
+            return Proposal(element="", verdict="new", diagnosis="The model's answer was not the JSON asked for: "
+                            + text[:300], next_step="escalate", relied_on="none", brain=self.name)
         return Proposal(element=d.get("element", ""), verdict=d.get("verdict", "new"), diagnosis=d.get("diagnosis", ""),
                         next_step=d.get("next_step", "escalate"), relied_on=d.get("relied_on", "none"),
                         confidence=float(d.get("confidence", 0)), precedent=d.get("precedent"),

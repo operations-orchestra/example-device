@@ -100,3 +100,25 @@ for tests and is never part of the Record.
 - SQLite has no write roles; per-subsystem write access is not modelled.
 - A Record built here shows that the plumbing works. It says nothing about diagnostic
   ability on real records.
+
+## The LLM brain
+
+The agent's scripted brain needs nothing. To compare it with a language model, list your
+endpoints in `~/.config/orchestra/llm.yaml`, outside this repository
+(`$ORCHESTRA_LLM_CONFIG` overrides). Start from `config/llm.example.yaml`. Profiles name
+endpoints and models, never keys: each says which variable holds its key (`api_key_env`).
+
+Each key is looked up first in the environment, then in `~/.config/orchestra/keys.env`, one
+`NAME=value` per line, which must be readable only by you:
+
+```bash
+mkdir -p ~/.config/orchestra && touch ~/.config/orchestra/keys.env && chmod 600 ~/.config/orchestra/keys.env
+# then add lines such as  GATEWAY_API_KEY=...  with an editor
+```
+
+- `pixi run orchestra profiles` lists the profiles and whether each key is found, never the key.
+- `pixi run orchestra ask 10 --profile gateway` asks one question in the terminal.
+- In Replay, "Compare with an LLM brain" asks the chosen profile and shows its answer under the
+  scripted brain's, with the same check. Nothing is sent until you press "Ask"; what is sent is
+  the question and the Record entries the model asks for, which here are synthetic. Restart
+  `orchestra view` after changing profiles or keys.

@@ -5,7 +5,8 @@
     orchestra show  INCIDENT_ID [--as-of TIME]
     orchestra plot  ELEMENT [--from TIME] [--to TIME] [--as-of TIME] [--out FILE]
     orchestra view  [--db out/record.db] [--port 8765]
-    orchestra ask   INCIDENT [--as-of TIME] [--db FILE] [--model-url URL --model NAME]
+    orchestra ask   INCIDENT [--as-of TIME] [--db FILE] [--profile NAME]
+    orchestra profiles
     orchestra demo  [--db FILE]
 
 TIME looks like 2040-03-02T01:05 (UTC).
@@ -126,11 +127,33 @@ def _print_answer(store, result) -> None:
 
 def _brain(args):
     from orchestrator.agent import ModelBrain, ScriptedBrain
+    from orchestrator.llm_config import get_profile
 
+    if getattr(args, "profile", None):
+        return ModelBrain.from_profile(get_profile(args.profile))
     if getattr(args, "model_url", None):
         import os
         return ModelBrain(args.model_url, args.model, os.environ.get("ORCHESTRA_API_KEY", ""))
     return ScriptedBrain()
+
+
+def _profiles(args: argparse.Namespace) -> int:
+    from orchestrator.llm_config import ConfigError, config_path, load_profiles
+
+    try:
+        found, default = load_profiles()
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"LLM profiles in {config_path()}" + ("" if found else ": none (the file is missing or has no openai_compatible profile)"))
+    for p in found.values():
+        d = p.describe()
+        mark = "*" if p.name == default else " "
+        problem = p.key_problem()
+        print(f" {mark} {p.name:<12} {d['model']:<30} {d['host']:<24} key: {'found' if not problem else 'NOT FOUND'}")
+        if problem:
+            print(f"     {problem}")
+    return 0
 
 
 def _ask(args: argparse.Namespace) -> int:
@@ -214,9 +237,13 @@ def main(argv: list[str] | None = None) -> int:
 
     p = reader("ask", "ask the agent about a problem, as of a moment")
     p.add_argument("incident", type=int, help="the incident whose symptoms the crew is looking at")
-    p.add_argument("--model-url", help="an OpenAI-compatible endpoint; without it the scripted brain answers")
+    p.add_argument("--profile", help="an LLM profile from config/llm.yaml; without it the scripted brain answers")
+    p.add_argument("--model-url", help="an OpenAI-compatible endpoint, instead of a profile (key from ORCHESTRA_API_KEY)")
     p.add_argument("--model", default="", help="model name for --model-url")
     p.set_defaults(func=_ask)
+
+    p = sub.add_parser("profiles", help="list the LLM profiles configured on this machine (never their keys)")
+    p.set_defaults(func=_profiles)
 
     p = reader("demo", "the Fig. 2 story: one problem met twice")
     p.set_defaults(func=_demo)

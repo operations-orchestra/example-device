@@ -1002,6 +1002,9 @@ PAGES.replay = async () => {
   <div class="card"><b>Learned in the last step</b>
     ${d.learned ? ((d.learned.changes.length || d.learned.entries.length) ? '<ul>' + d.learned.changes.map((c) => `<li>${esc(c.what)}</li>`).join('') + d.learned.entries.map((e) => `<li>entry ${entryLink(e.id)}: ${esc(describe(e))}</li>`).join('') + '</ul>' : '<p class="muted">Entries already on record were attached to the incident.</p>') : '<p class="muted">Press "next step".</p>'}</div></div>
   <div id="agent-panel" class="agent"><b>What the agent would say at this moment</b> <span class="muted small">asking…</span></div>
+  <div class="compare"><b>Compare with an LLM brain:</b> <select id="cmp-brain"><option value="">choose a profile…</option></select>
+    <button id="cmp-ask">Ask</button> <span id="cmp-status" class="muted small"></span></div>
+  <div id="agent-panel-2"></div>
   <details ${RS.parts ? 'open' : ''} data-rs="parts"><summary><b>Parts this problem concerns, as known now</b> (${(d.parts || []).length})</summary>${partsTable(d.parts)}</details>
   ${replaySections(f.element)}
   <details ${RS.seen ? 'open' : ''} data-rs="seen"><summary><b>Has this been seen before?</b> ${p.same_element.length} on a shared part, ${p.same_symptom.length} with the same kind of symptom</summary>
@@ -1021,11 +1024,34 @@ PAGES.replay = async () => {
   } };
 };
 const VERDICT_CLS = { known: 'v-known', uncertain: 'v-uncertain', new: 'v-new' };
+const CMP = { brain: '' };
 async function mountAgent(iid, caseFor) {
   const host = $('#agent-panel');
   if (!host) return;
   let a;
   try { a = await api('agent', { id: iid }); } catch (e) { host.innerHTML = `<b>What the agent would say at this moment</b><p>${esc(e.message)}</p>`; return; }
+  renderAgent(host, a, caseFor);
+  // the LLM comparison: profiles come from ~/.config/orchestra/llm.yaml on the server; keys never reach the browser
+  const sel = $('#cmp-brain'), status = $('#cmp-status');
+  const pr = await api('profiles', {}, false);
+  if (!pr.profiles.length) {
+    sel.disabled = true; $('#cmp-ask').disabled = true;
+    status.textContent = pr.error || 'No LLM profiles configured: create ~/.config/orchestra/llm.yaml on this machine.';
+    return;
+  }
+  sel.innerHTML += pr.profiles.map((p) => `<option value="${esc(p.name)}"${p.key_available ? '' : ' disabled'}${p.name === CMP.brain ? ' selected' : ''}>${esc(p.name)}: ${esc(p.model)} at ${esc(p.host)}${p.key_available ? '' : ' (key not found: ' + esc(p.key_source) + ')'}</option>`).join('');
+  const ask = async () => {
+    CMP.brain = sel.value;
+    if (!CMP.brain) return;
+    const host2 = $('#agent-panel-2');
+    host2.className = 'agent agent-llm';
+    host2.innerHTML = `<b>What the agent would say at this moment</b> <span class="brain brain-model">LLM brain</span> <span class="muted small">asking ${esc(CMP.brain)}… this sends the question and the Record entries the model asks for to that endpoint</span>`;
+    try { renderAgent(host2, await api('agent', { id: iid, brain: CMP.brain }), caseFor); } catch (e) { host2.innerHTML = `<b>LLM brain</b><p class="bad-text">${esc(e.message)}</p>`; }
+  };
+  $('#cmp-ask').addEventListener('click', ask);
+  if (CMP.brain) ask();
+}
+function renderAgent(host, a, caseFor) {
   if (!a.trigger) { host.innerHTML = `<b>What the agent would say at this moment</b><p class="muted">${esc(a.message)}</p>`; return; }
   const p = a.proposal, cited = a.cited, log = a.log;
   const pct = (x) => `${Math.round(x * 100)}%`;
@@ -1033,7 +1059,8 @@ async function mountAgent(iid, caseFor) {
   const call = (qid) => log[qid - 1];
   const argText = (c) => Object.entries(c.args).map(([k, v]) => `${k}=${Array.isArray(v) ? '[' + v.join(', ') + ']' : (['t', 't0', 't1', 'before'].includes(k) ? fmt(v) : v)}`).join(', ');
   const BRAINS = { scripted: ['Scripted brain', 'a fixed procedure, no language model'], model: ['LLM brain', 'a language model calling the same tools'] };
-  const [brainName, brainWhat] = BRAINS[p.brain] || [p.brain, ''];
+  const [brainName, brainWhat0] = BRAINS[p.brain] || [p.brain, ''];
+  const brainWhat = p.brain_label ? `${brainWhat0} (${p.brain_label})` : brainWhat0;
   host.innerHTML = `<div class="agent-head"><b>What the agent would say at this moment</b>
       <span class="brain brain-${esc(p.brain)}">${brainName}</span><span class="muted small">${brainWhat}</span></div>
     <div class="io-agent">

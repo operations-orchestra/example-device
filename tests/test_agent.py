@@ -168,3 +168,58 @@ def test_agent_report_judges_by_later_reviews_only(call, tiny, store):
     assert {r["outcome"] for r in early["rows"]} <= {"not reviewed yet", "right"}
     assert all(r["asked"] <= second["ask_at"] + 3600 for r in early["rows"])
     assert body["learning"][0]["symptom"] == pytest.approx(1 / 3, abs=1e-3)
+
+
+def test_profiles_keep_keys_out_of_the_file_and_out_of_sight(tmp_path, monkeypatch):
+    import os
+
+    from orchestrator.llm_config import ConfigError, config_path, get_profile, load_profiles
+
+    monkeypatch.delenv("ORCHESTRA_LLM_CONFIG", raising=False)
+    assert str(config_path()).endswith(".config/orchestra/llm.yaml")    # real profiles stay out of the repository
+    cfg = tmp_path / "llm.yaml"
+    cfg.write_text("""
+default: gw
+profiles:
+  gw:
+    backend: openai_compatible
+    options: {base_url: "https://gw.example/v1", model: m1, api_key_env: TEST_ORCH_KEY}
+  local:
+    backend: openai_compatible
+    options: {base_url: "http://127.0.0.1:11434/v1", model: m2}
+  mock:
+    backend: mock
+""")
+    keys = tmp_path / "keys.env"
+    monkeypatch.setenv("ORCHESTRA_LLM_CONFIG", str(cfg))
+    monkeypatch.setenv("ORCHESTRA_KEYS_FILE", str(keys))
+    monkeypatch.delenv("TEST_ORCH_KEY", raising=False)
+    found, default = load_profiles()
+    assert set(found) == {"gw", "local"} and default == "gw"           # "mock" is not an LLM brain here
+    assert not found["gw"].key_available() and found["local"].key_available()
+    keys.write_text("export TEST_ORCH_KEY=from-file\n")
+    os.chmod(keys, 0o644)
+    assert "chmod 600" in found["gw"].key_problem()                    # readable by others: refused
+    os.chmod(keys, 0o600)
+    assert get_profile().api_key() == "from-file"
+    monkeypatch.setenv("TEST_ORCH_KEY", "secret-123")                  # the environment wins
+    brain = ModelBrain.from_profile(get_profile())
+    assert brain._key == "secret-123" and "secret-123" not in repr(brain)
+    assert "secret-123" not in json.dumps(found["gw"].describe())
+    cfg.write_text("profiles:\n  bad:\n    backend: openai_compatible\n    options: {base_url: x, model: y, api_key: oops}\n")
+    with pytest.raises(ConfigError):
+        load_profiles()
+
+
+def test_the_repository_holds_only_an_example_without_keys(monkeypatch):
+    import yaml
+
+    from orchestrator.llm_config import REPO, load_profiles
+
+    assert not (REPO / "config" / "llm.yaml").exists()
+    example = REPO / "config" / "llm.example.yaml"
+    data = yaml.safe_load(example.read_text())
+    assert all("api_key" not in (s.get("options") or {}) for s in data["profiles"].values())
+    monkeypatch.setenv("ORCHESTRA_LLM_CONFIG", str(example))
+    found, default = load_profiles()
+    assert default == "local" and set(found) == {"local", "gateway"}

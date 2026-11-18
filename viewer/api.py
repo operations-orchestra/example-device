@@ -19,7 +19,8 @@ from aggregator import TABLES, RecordStore, StoredEntry
 from utils import to_iso
 from aggregator.view import scope
 
-from orchestrator.agent import ScriptedBrain, diagnose, trigger_for
+from orchestrator.agent import ModelBrain, ScriptedBrain, diagnose, trigger_for
+from orchestrator.llm_config import ConfigError, get_profile, load_profiles
 
 from . import precedents as prec
 
@@ -582,22 +583,55 @@ def _archive_summary(archive) -> Optional[dict]:
             "bytes": sum((archive.dir / c["file"]).stat().st_size for c in chans)}
 
 
+def profiles(store: RecordStore, q: dict, ctx: dict) -> dict:
+    """The LLM profiles configured on this machine: names, hosts and models, never keys."""
+    try:
+        found, default = load_profiles()
+    except ConfigError as exc:
+        return {"profiles": [], "default": None, "error": str(exc)}
+    return {"profiles": [p.describe() for p in found.values()], "default": default}
+
+
+_AGENT_CACHE: dict[tuple, dict] = {}
+
+
 def agent(store: RecordStore, q: dict, ctx: dict) -> dict:
-    """What the scripted agent would propose for the problem being replayed, at this moment."""
+    """What an agent would propose for the problem being replayed, at this moment.
+
+    ``brain`` is "scripted" (default) or the name of an LLM profile. LLM answers are cached per
+    incident, moment and profile, so revisiting a step does not ask the model again.
+    """
     as_of = _as_of(q)
     iid = _int(q, "id", required=True)
     trig = trigger_for(store, iid, as_of)
     if trig is None:
         return {"trigger": None, "message": "No symptom of this problem is on record yet: there is nothing to ask about."}
-    r = diagnose(trig, ScriptedBrain(), store, ctx.get("archive"))
+    which = q.get("brain") or "scripted"
+    if which == "scripted":
+        brain = ScriptedBrain()
+    else:
+        key = (str(store.path), iid, as_of, which)
+        if key in _AGENT_CACHE:
+            return _AGENT_CACHE[key]
+        try:
+            brain = ModelBrain.from_profile(get_profile(which))
+        except ConfigError as exc:
+            raise ApiError(str(exc)) from None
+    try:
+        r = diagnose(trig, brain, store, ctx.get("archive"))
+    except Exception as exc:                    # an unreachable or failing endpoint: say so, without details of the key
+        raise ApiError(f"the {which} brain failed: {exc.__class__.__name__}: {str(exc)[:200]}", 502) from None
     p = r["proposal"]
     cited = {}
     for c in p.supporting + p.conflicting:
         e = store.get_entry(c.entry_id, as_of)
         if e:
             cited[c.entry_id] = _e(e)
-    return {"trigger": asdict(trig), "proposal": asdict(p), "log": r["log"].as_dicts(), "problems": r["problems"],
-            "accepted": r["accepted"], "settings": r["settings"].describe(), "learned": r["learned"], "cited": cited}
+    out = {"trigger": asdict(trig), "proposal": asdict(p), "log": r["log"].as_dicts(), "problems": r["problems"],
+           "accepted": r["accepted"], "settings": r["settings"].describe(), "learned": r["learned"], "cited": cited}
+    if which != "scripted":
+        _AGENT_CACHE[(str(store.path), iid, as_of, which)] = out
+    return out
 
 
 _REPORT_CACHE: dict[tuple, dict] = {}
@@ -735,8 +769,9 @@ ROUTES: dict[str, Callable[[RecordStore, dict, dict], dict]] = {
     "meta": meta, "next_known": next_known, "overview": overview, "elements": elements,
     "entries": entries, "entry": entry, "incidents": incidents, "incident": incident,
     "timeline": timeline, "tables": tables, "map": detector_map, "diff": diff, "precedents": precedents, "read": read,
-    "replay": replay, "built": built, "interfaces": interfaces, "agent": agent, "agent_report": agent_report, "demo/planted": demo_planted, "demo/device": demo_device,
+    "replay": replay, "built": built, "interfaces": interfaces, "agent": agent, "agent_report": agent_report,
+    "profiles": profiles, "demo/planted": demo_planted, "demo/device": demo_device,
 }
 # Endpoints that may be called without as_of, and why (see the module docstring).
-NO_AS_OF = {"meta", "next_known", "demo/planted", "demo/device"}
+NO_AS_OF = {"meta", "next_known", "profiles", "demo/planted", "demo/device"}
 DEMO_ONLY = {"demo/planted", "demo/device"}

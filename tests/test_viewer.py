@@ -47,7 +47,7 @@ def test_reads_are_refused_without_as_of(call, route):
 
 
 def test_only_named_endpoints_skip_as_of():
-    assert NO_AS_OF == {"meta", "next_known"} | DEMO_ONLY
+    assert NO_AS_OF == {"meta", "next_known", "profiles"} | DEMO_ONLY
 
 
 @pytest.mark.parametrize("route", ["overview", "entries", "incidents", "timeline", "precedents", "read", "map", "replay", "built", "tables"])
