@@ -7,6 +7,7 @@
     orchestra view  [--db out/record.db] [--port 8765]
     orchestra ask   INCIDENT [--as-of TIME] [--db FILE] [--profile NAME]
     orchestra profiles
+    orchestra export-static [--db FILE] [--out FILE]
     orchestra demo  [--db FILE]
 
 TIME looks like 2040-03-02T01:05 (UTC).
@@ -197,6 +198,16 @@ def _demo(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export_static(args: argparse.Namespace) -> int:
+    from viewer.static_export import export
+
+    out = args.out or str(Path(args.db).parent / "demo" / "orchestra-demo.html")
+    r = export(args.db, out)
+    print(f"Wrote {r['path']} ({r['file_mb']} MB; {r['answers']} answers, {r['entries']} entries). "
+          "Open it in a browser; no server needed.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orchestra", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -241,6 +252,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--model-url", help="an OpenAI-compatible endpoint, instead of a profile (key from ORCHESTRA_API_KEY)")
     p.add_argument("--model", default="", help="model name for --model-url")
     p.set_defaults(func=_ask)
+
+    p = reader("export-static", "write the Record browser as one HTML file that needs no server")
+    p.add_argument("--out", help="output file (default: <record dir>/demo/orchestra-demo.html)")
+    p.set_defaults(func=_export_static)
 
     p = sub.add_parser("profiles", help="list the LLM profiles configured on this machine (never their keys)")
     p.set_defaults(func=_profiles)

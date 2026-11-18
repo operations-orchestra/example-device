@@ -30,7 +30,49 @@ function dur(s) {
   if (a < 86400) return `${(s / 3600).toFixed(1)} h`;
   return `${(s / 86400).toFixed(1)} d`;
 }
+/* Static demo: the page carries its answers (viewer/static_export.py) instead of asking the local service. */
+const STATIC = typeof window.ORCHESTRA_STATIC === 'string';
+const DROP = new Set(['since', 't0', 't1', 'limit', 'offset', 'order']);
+const staticKey = (route, q) => route + '?' + Object.keys(q).filter((k) => !DROP.has(k) && q[k] !== undefined && q[k] !== null && q[k] !== '')
+  .sort().map((k) => `${k}=${q[k]}`).join('&');
+async function loadBundle() {
+  const bytes = Uint8Array.from(atob(window.ORCHESTRA_STATIC), (c) => c.charCodeAt(0));
+  const text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  S.bundle = JSON.parse(text);
+}
+function staticEntries(q) {
+  if (String(q.as_of) !== String(S.bundle.end)) throw new Error(NOT_STATIC);
+  let rows = S.bundle.entries;
+  const list = (k) => (q[k] ? String(q[k]).split(',') : null);
+  if (q.element) {
+    const names = new Set([q.element]);
+    if (q.below) { let grew = true; while (grew) { grew = false; for (const e of S.elements) if (names.has(e.parent) && !names.has(e.name)) { names.add(e.name); grew = true; } } }
+    rows = rows.filter((e) => names.has(e.element));
+  }
+  for (const [k, f] of [['class', 'record_class'], ['source', 'source'], ['type', 'type'], ['kind', 'kind']]) { const l = list(k); if (l) rows = rows.filter((e) => l.includes(e[f])); }
+  if (q.q) { const t = String(q.q).toLowerCase(); rows = rows.filter((e) => JSON.stringify(e.payload).toLowerCase().includes(t)); }
+  if (q.order === 'newest') rows = [...rows].reverse();
+  const off = +(q.offset || 0), lim = +(q.limit || 100);
+  return { total: rows.length, entries: rows.slice(off, off + lim) };
+}
+const NOT_STATIC = 'This static demo holds this page for the finished Record, and in Replay only the Replay page, the detector and the incident being followed. Exit the replay, or run the live browser (pixi run orchestra view) to see everything at any moment.';
+/* the moments the static demo holds for an incident's replay; others snap to the latest one before */
+function staticMoment(id, t) {
+  const held = Object.keys(S.bundle.answers).filter((k) => k.startsWith('replay?') && k.endsWith(`&id=${id}`))
+    .map((k) => +k.match(/as_of=(\d+)/)[1]).sort((a, b) => a - b);
+  const before = held.filter((x) => x <= t);
+  return before.length ? before[before.length - 1] : held[0];
+}
+function staticApi(route, q) {
+  if (route === 'entries') return staticEntries(q);
+  if (route === 'profiles') return { profiles: [], error: 'Comparing with an LLM brain needs the live browser (pixi run orchestra view); this static demo has only the scripted brain.' };
+  const hit = S.bundle.answers[staticKey(route, q)];
+  if (hit === undefined) throw new Error(route === 'read' || route === 'next_known' || route === 'diff' ? 'This needs the live browser (pixi run orchestra view).' : NOT_STATIC);
+  if (hit && hit.__error) throw new Error(hit.__error);
+  return JSON.parse(JSON.stringify(hit));
+}
 async function api(route, params = {}, withAsOf = true) {
+  if (STATIC) return staticApi(route, withAsOf ? { as_of: S.asOf, ...params } : params);
   const q = new URLSearchParams(withAsOf ? { as_of: S.asOf, ...params } : params);
   const r = await fetch(`/api/${route}?${q}`);
   const j = await r.json();
@@ -74,7 +116,7 @@ let playTimer = null;
 function stopPlay() { if (playTimer) { clearInterval(playTimer); playTimer = null; } }
 async function startReplay(id) {
   const end = S.meta.latest_known_at;
-  const d = await (await fetch(`/api/replay?id=${id}&as_of=${end}`)).json();
+  const d = await api('replay', { id, as_of: end }, false);
   S.replay = { id, title: d.frame.title, ask: d.ask_time, opened: d.frame.opened_at, steps: d.steps, prev: null };
   S.asOf = d.ask_time;
   location.hash = '#/replay';
@@ -87,6 +129,7 @@ function startFreeReplay(t) {            // look at a moment without following a
 function exitReplay() { stopPlay(); S.replay = null; S.asOf = S.meta.latest_known_at; syncHash(); render(); }
 function setAsOf(t) {
   if (!S.replay) return;
+  if (STATIC && S.replay.id != null) t = staticMoment(S.replay.id, t);
   t = Math.max(S.meta.t0, Math.min(S.meta.latest_known_at, Math.round(t)));
   if (t === S.asOf) return;
   S.replay.prev = S.asOf; S.asOf = t; syncHash(); render();
@@ -492,7 +535,7 @@ function drawNav(current) {
     const on = cur === key || (subs && subs.some(([k]) => k === cur));
     return `<a href="#/${key}" class="navtop${on && !subs ? ' on' : ''}${demo ? ' demo' : ''}" ${demo ? 'title="Demo explainer: not part of the production Record browser"' : ''}><span class="n">${n}</span>${label}</a>` +
       (subs ? `<div class="subs">${subs.map(([k, l]) => `<a href="#/${k}" class="${cur === k ? 'on' : ''}">${l}</a>`).join('')}</div>` : '');
-  }).join('') + '<div class="navfoot"><span class="demo-key"></span> demo explainer, not part of the production Record browser<br><br><a href="#/api">For developers: read API</a></div>';
+  }).join('') + `<div class="navfoot"><span class="demo-key"></span> demo explainer, not part of the production Record browser<br><br>${STATIC ? 'Static demo: a snapshot of one Record. Run <span class="mono">pixi run orchestra view</span> for the live browser.' : '<a href="#/api">For developers: read API</a>'}</div>`;
 }
 
 const EXPLAINER = (what) => `<div class="explainer"><b>Demo explainer, not part of the production Record browser.</b> ${what}</div>`;
@@ -1275,6 +1318,10 @@ async function render() {
     const out = await PAGES[page](parts);
     if (my !== token) return;
     main.innerHTML = out.html;
+    if (STATIC) {
+      main.querySelectorAll('a[href^="/source/"]').forEach((a) => { a.removeAttribute('href'); a.title = 'The source view needs the live browser'; });
+      main.querySelectorAll('[data-free], [data-recfile]').forEach((b) => b.remove());
+    }
     main.querySelectorAll('table.sortable').forEach(makeSortable);
     if (out.mount) out.mount();
   } catch (e) {
@@ -1335,16 +1382,23 @@ async function openRecordPanel() {
 }
 
 (async function start() {
+  if (STATIC) {
+    await loadBundle();
+    document.body.classList.add('static');
+    $('#rec-btn').innerHTML = 'Record: <span id="rec-name"></span>';
+    $('#rec-btn').title = 'A snapshot: the static demo cannot load another Record';
+    $('#banner').textContent = `Static demo · synthetic, not CMS data · written directly by a generator`;
+  }
   S.meta = await api('meta', {}, false);
-  $('#rec-name').textContent = S.meta.path;
-  $('#rec-btn').addEventListener('click', openRecordPanel);
+  $('#rec-name').textContent = STATIC ? `${S.meta.path} (snapshot ${S.bundle.built})` : S.meta.path;
+  if (!STATIC) $('#rec-btn').addEventListener('click', openRecordPanel);
   $('#banner').title = S.meta.banner;
   S.asOf = S.meta.latest_known_at;
   S.elements = (await api('elements')).elements;
   const m = location.hash.match(/[?&]r=(\w+)&t=(\d+)/);
   if (m && m[1] !== 'free') {                      // a reloaded or shared replay link
-    const d = await (await fetch(`/api/replay?id=${m[1]}&as_of=${S.meta.latest_known_at}`)).json();
-    if (d.frame) { S.replay = { id: +m[1], title: d.frame.title, ask: d.ask_time, opened: d.frame.opened_at, steps: d.steps, prev: null }; S.asOf = +m[2]; }
+    const d = await api('replay', { id: m[1], as_of: S.meta.latest_known_at }, false);
+    if (d.frame) { S.replay = { id: +m[1], title: d.frame.title, ask: d.ask_time, opened: d.frame.opened_at, steps: d.steps, prev: null }; S.asOf = STATIC ? staticMoment(+m[1], +m[2]) : +m[2]; }
   } else if (m) { S.replay = { id: null, title: null, ask: +m[2], opened: null, steps: null, prev: null }; S.asOf = +m[2]; }
   if (!location.hash) location.hash = '#/detector';
   render();

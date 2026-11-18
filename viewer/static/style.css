@@ -204,3 +204,4 @@ th.sorthead[data-dir="asc"]::after { content: " ▲"; } th.sorthead[data-dir="de
 .brain-scripted { background: var(--ink2); } .brain-model { background: var(--s7); }
 .compare { margin: -6px 0 10px; padding: 6px 12px; border: 1px dashed var(--axis); border-radius: 8px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .agent.agent-llm { border-left-color: var(--s7); } .agent-llm .io-out { border-color: var(--s7); }
+body.static #rec-btn { cursor: default; } body.static #rec-btn::after { content: none; }
