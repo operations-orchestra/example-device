@@ -214,7 +214,11 @@ profiles:
 def test_git_holds_only_an_example_without_keys(monkeypatch):
     import yaml
 
-    from orchestrator.llm_config import REPO, load_profiles
+    from pathlib import Path
+
+    from orchestrator.llm_config import load_profiles
+
+    REPO = Path(__file__).resolve().parent.parent
 
     import subprocess
 

@@ -18,7 +18,7 @@ from aggregator import RecordStore
 
 import html
 
-from .api import NO_AS_OF, ROOT, ROUTES, ApiError
+from .api import NO_AS_OF, ROUTES, ApiError, package_dir, source_path
 
 STATIC = Path(__file__).with_name("static")
 
@@ -47,8 +47,11 @@ SOURCE_DIRS = ("example_device", "aggregator", "utils", "viewer", "adapters", "a
 
 def source_page(rel: str) -> Optional[bytes]:
     """One source file of this project as a page with numbered, linkable lines. Read-only."""
-    target = (ROOT / rel).resolve()
-    allowed = any((ROOT / d).resolve() in target.parents for d in SOURCE_DIRS)
+    package = rel.partition("/")[0]
+    if package not in SOURCE_DIRS:
+        return None
+    target = source_path(rel).resolve()
+    allowed = package_dir(package) in target.parents
     if not allowed or target.suffix not in (".py", ".sql") or not target.is_file():
         return None
     rows = "".join(f'<tr id="L{n}"><td class="n">{n}</td><td><pre>{html.escape(line) or " "}</pre></td></tr>'

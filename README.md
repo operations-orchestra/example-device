@@ -12,6 +12,18 @@ that answers "has this been seen before, and what should we do?" with cited evid
 
 ## Try it
 
+The code is split across the repositories of the `operations-orchestra` organization, so
+first check out this one and its siblings side by side, all on `prototype/synthetic-record`
+(see [Repositories](#repositories)):
+
+```bash
+mkdir operations-orchestra && cd operations-orchestra
+for r in example-device utils aggregator anonymizer summarizer sparsifier orchestrator; do
+  git clone -b prototype/synthetic-record git@github.com:operations-orchestra/$r.git
+done
+cd example-device
+```
+
 - **No installation:** open the single-file demo, `orchestra-demo.html`, in a browser. It is
   sent separately, because generated files are not committed; build it yourself with
   `pixi run orchestra synth --preset small --out out/small` and
@@ -37,22 +49,38 @@ run or fill numbers, timestamps, host names, or logbook text. The generator enfo
 this by construction (the calendar starts in 2040, run numbers at 900001, fill numbers
 at 50001) and a test checks it.
 
-## Status
+## Repositories
 
-Work in progress on the branch `prototype/synthetic-record`.
+Work in progress on the branch `prototype/synthetic-record` of every repository below. Each
+component is its own repository in the `operations-orchestra` organization, holding one Python
+package of the same name (`aggregator/aggregator/`, `utils/utils/`, ...). They are expected
+side by side, as siblings of this one:
 
-| Folder | What it is | State |
-|---|---|---|
-| `utils/` | the shared entry definition and time helpers | runs |
-| `aggregator/` | the Operations Record (SQLite), its write and read APIs, viewing tools ([README](aggregator/README.md)) | runs |
-| `example_device/` | the seeded generator for the synthetic device and its simulated source archives | runs |
-| `adapters/` | reads a source on demand; two so far, for the simulated control-system and data-quality archives | runs |
-| `orchestrator/` | the agent's six read-only tools, its confidence, the scripted brain, and an LLM brain | runs; the LLM brain has not yet been tried on a real endpoint |
-| `viewer/` | the Record browser, and its single-file export | runs |
-| `anonymizer/`, `summarizer/`, `sparsifier/`, `adapters/base.py`, `aggregator/linker.py` | the rest of the feed, and the direct-link builder | interfaces only |
+```
+operations-orchestra/
+├── example-device/    this repository: the synthetic device, adapters, viewer, CLI, tests, docs
+├── utils/
+├── aggregator/
+├── anonymizer/
+├── summarizer/
+├── sparsifier/
+└── orchestrator/
+```
 
-The folders are named after the repositories of the `operations-orchestra` organization
-so each can move to its own repository later. A test keeps their imports separate.
+| Repository | Package | What it is | State |
+|---|---|---|---|
+| [utils](https://github.com/operations-orchestra/utils) | `utils` | the shared entry definition and time helpers | runs |
+| [aggregator](https://github.com/operations-orchestra/aggregator) | `aggregator` | the Operations Record (SQLite), its write and read APIs, viewing tools ([README](https://github.com/operations-orchestra/aggregator/blob/prototype/synthetic-record/aggregator/README.md)); `aggregator/linker.py`, the direct-link builder, is an interface only | runs |
+| [orchestrator](https://github.com/operations-orchestra/orchestrator) | `orchestrator` | the agent's six read-only tools, its confidence, the scripted brain, and an LLM brain | runs; the LLM brain has not yet been tried on a real endpoint |
+| [anonymizer](https://github.com/operations-orchestra/anonymizer), [summarizer](https://github.com/operations-orchestra/summarizer), [sparsifier](https://github.com/operations-orchestra/sparsifier) | `anonymizer`, `summarizer`, `sparsifier` | the rest of the feed | interfaces only |
+| example-device (this one) | `example_device` | the seeded generator for the synthetic device and its simulated source archives | runs |
+| | `adapters` | reads a source on demand; two so far, for the simulated control-system and data-quality archives; `adapters/base.py` is the interface | runs |
+| | `viewer` | the Record browser, and its single-file export | runs |
+
+This repository finds the others through `PYTHONPATH`: `pixi.toml` sets it for every
+`pixi run`, and `pyproject.toml` sets pytest's `pythonpath`, both pointing at `../utils`,
+`../aggregator` and the rest. A test (`tests/test_boundaries.py`) keeps the packages'
+imports separate, wherever each one lives.
 
 ## Quick start
 
@@ -70,7 +98,12 @@ pixi run orchestra plot HFP02 --from 2040-03-01T10:00 --to 2040-03-02T20:00
 pixi run pytest -q
 ```
 
-Without pixi: `pip install -e '.[plot,dev]'` on Python 3.10 or later.
+Without pixi: `pip install -e '.[plot,dev]'` on Python 3.10 or later, which installs only this
+repository's packages; put the sibling repositories on the path yourself:
+
+```bash
+export PYTHONPATH=$(for r in utils aggregator anonymizer summarizer sparsifier orchestrator; do printf '%s:' "$PWD/../$r"; done)
+```
 
 ## The Record browser
 
@@ -129,8 +162,10 @@ for tests and is never part of the Record.
 ## The LLM brain
 
 The agent's scripted brain needs nothing. To compare it with a language model, list your
-endpoints in `config/llm.yaml`, which git ignores (`$ORCHESTRA_LLM_CONFIG` overrides). Start
-from `config/llm.example.yaml`. Profiles name endpoints and models, never keys: each says
+endpoints in `config/llm.yaml` in this repository, which git ignores (`$ORCHESTRA_LLM_CONFIG`
+overrides). Start from `config/llm.example.yaml`. The orchestrator looks for
+`config/llm.yaml` under the directory you run from, so run `orchestra` from this repository's
+root, or set `$ORCHESTRA_LLM_CONFIG`. Profiles name endpoints and models, never keys: each says
 which variable holds its key (`api_key_env`). Only the keys live outside the repository.
 
 Each key is looked up first in the environment, then in `~/.config/orchestra/keys.env`, one

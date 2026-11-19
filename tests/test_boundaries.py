@@ -5,6 +5,16 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _folder(package: str) -> Path:
+    """The package's source: in this repo, or in its own sibling repo (on the test path)."""
+    import importlib.util
+
+    spec = importlib.util.find_spec(package)
+    if spec is None or not spec.submodule_search_locations:
+        return ROOT / package
+    return Path(next(iter(spec.submodule_search_locations)))
 ALLOWED = {
     "utils": set(),
     "adapters": {"utils"},
@@ -31,18 +41,18 @@ def _imports(path: Path) -> set[str]:
 
 @pytest.mark.parametrize("package", sorted(ALLOWED))
 def test_package_only_imports_what_it_may(package):
-    folder = ROOT / package
+    folder = _folder(package)
     if not folder.exists():
         pytest.skip(f"{package}/ not built yet")
     for path in folder.rglob("*.py"):
         extra = _imports(path) - ALLOWED[package] - {package}
-        assert not extra, f"{path.relative_to(ROOT)} imports {sorted(extra)}"
+        assert not extra, f"{path} imports {sorted(extra)}"
 
 
 def test_sql_lives_only_in_the_aggregator():
     for package in OURS - {"aggregator"}:
-        for path in (ROOT / package).rglob("*.py") if (ROOT / package).exists() else []:
-            assert "sqlite3" not in _all_imports(path), f"{path.relative_to(ROOT)} imports sqlite3"
+        for path in _folder(package).rglob("*.py") if _folder(package).exists() else []:
+            assert "sqlite3" not in _all_imports(path), f"{path} imports sqlite3"
 
 
 def _all_imports(path: Path) -> set[str]:

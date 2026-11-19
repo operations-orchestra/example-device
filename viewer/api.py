@@ -446,6 +446,22 @@ def replay(store: RecordStore, q: dict, ctx: dict) -> dict:
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def package_dir(package: str) -> Path:
+    """Where a top-level package's source lives: in this repo, or in its own sibling repo."""
+    import importlib.util
+
+    spec = importlib.util.find_spec(package)
+    if spec is None or not spec.submodule_search_locations:
+        return ROOT / package
+    return Path(next(iter(spec.submodule_search_locations))).resolve()
+
+
+def source_path(rel: str) -> Path:
+    """``rel`` is "<package>/<file>"; resolved against wherever that package is."""
+    package, _, rest = rel.partition("/")
+    return package_dir(package) / rest
 # Where in the source each thing on the "how the Record is built" page is done.
 # (file, text that starts the relevant code). Line numbers are looked up when asked,
 # so the links keep pointing at the right place as the code changes.
@@ -469,7 +485,7 @@ SOURCE_SPOTS = {
 def source_spots() -> dict[str, Optional[dict]]:
     out: dict[str, Optional[dict]] = {}
     for key, (rel, needle) in SOURCE_SPOTS.items():
-        path = ROOT / rel
+        path = source_path(rel)
         line = None
         if path.is_file():
             line = next((n for n, text in enumerate(path.read_text().splitlines(), 1) if needle in text), None)
@@ -503,7 +519,7 @@ def _describe_module(rel: str) -> dict:
     """Classes, fields, methods and the module's ROLE/STATUS/EXAMPLE, read from the code itself."""
     import ast
 
-    path = ROOT / rel
+    path = source_path(rel)
     text = path.read_text()
     lines = text.splitlines()
     tree = ast.parse(text)

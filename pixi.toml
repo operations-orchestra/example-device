@@ -16,3 +16,7 @@ operations-orchestra-example = { path = ".", editable = true }
 [tasks]
 test = "pytest -q"
 synth = "orchestra synth"
+
+# The Orchestra components live in sibling repos of this one (../aggregator etc.).
+[activation.env]
+PYTHONPATH = "$PIXI_PROJECT_ROOT/../utils:$PIXI_PROJECT_ROOT/../aggregator:$PIXI_PROJECT_ROOT/../anonymizer:$PIXI_PROJECT_ROOT/../summarizer:$PIXI_PROJECT_ROOT/../sparsifier:$PIXI_PROJECT_ROOT/../orchestrator"
